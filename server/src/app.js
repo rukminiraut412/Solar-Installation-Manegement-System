@@ -9,7 +9,6 @@ import { notFoundHandler } from './middleware/notFoundHandler.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import authRouter from './modules/auth/auth.routes.js';
 import mediaRouter from './shared/routes/media.routes.js';
-import customerSalesRouter from './modules/customer-sales/customer-sales.routes.js';
 
 const app = express();
 
@@ -68,9 +67,6 @@ apiRouter.use('/auth', authRouter);
 
 // Mount Platform Foundation Shared Media Upload module
 apiRouter.use('/media', mediaRouter);
-
-// Mount Member 2 Customer & Sales module
-apiRouter.use('/customer-sales', customerSalesRouter);
 
 // Mount API router
 app.use('/api/v1', apiRouter);

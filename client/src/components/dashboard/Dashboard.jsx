@@ -1,6 +1,5 @@
 import React from 'react';
 import { useAuth } from '../../shared/context/AuthContext';
-import CustomerSalesModule from '../../features/customer-sales/CustomerSalesModule';
 import {
   ShieldCheck,
   Database,
@@ -15,10 +14,6 @@ import {
 
 export default function Dashboard({ activeTab }) {
   const { user } = useAuth();
-
-  if (activeTab === 'leads' || activeTab === 'quotes') {
-    return <CustomerSalesModule initialTab={activeTab} />;
-  }
 
   return (
     <div className="space-y-8">
