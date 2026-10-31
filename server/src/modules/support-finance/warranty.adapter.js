@@ -9,11 +9,15 @@
  * Database Table: `warranty_records` JOIN `serial_items` JOIN `products`
  * Columns: id, serial_number, product_name, duration_months, start_date, end_date, status, party, scope
  * 
- * Current Status: PENDING MEMBER 3 OPERATIONS MODULE MERGE
+ * Current Status: PENDING MEMBER 3 OPERATIONS MODULE LIVE MERGE
+ * Never silently treats unavailable or offline warranty data as confirmed coverage.
  */
 
+import { ENV } from '../../config/env.js';
 import { query } from '../../db/connection.js';
 import { store } from './store.js';
+
+const isProduction = () => (process.env.NODE_ENV === 'production' || ENV.NODE_ENV === 'production');
 
 export const WarrantyAdapter = {
   isOperationsModuleMerged: false,
@@ -21,7 +25,7 @@ export const WarrantyAdapter = {
   /**
    * Look up warranty status for a component by serial number
    * Queries PostgreSQL `warranty_records` if database is connected;
-   * Otherwise falls back to mock contract records with explicit status flag.
+   * In production mode, never silently falls back to in-memory fixtures.
    */
   async checkEligibility(serialNumber, claimDate = new Date().toISOString().split('T')[0]) {
     const cleanSerial = (serialNumber || '').trim();
@@ -35,7 +39,7 @@ export const WarrantyAdapter = {
       };
     }
 
-    // Attempt live PostgreSQL query matching 001_foundation.sql schema
+    // Attempt live PostgreSQL query matching 001_foundation.sql / Member 3 contract
     const sql = `
       SELECT 
         w.id AS warranty_id,
@@ -57,7 +61,7 @@ export const WarrantyAdapter = {
 
     try {
       const res = await query(sql, [cleanSerial]);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         const row = res.rows[0];
         return this._evaluateDates(row, claimDate, true);
       }
@@ -65,7 +69,18 @@ export const WarrantyAdapter = {
       console.warn(`[WARRANTY-ADAPTER-NOTICE] Operations SQL query: ${err.message}`);
     }
 
-    // Fallback adapter record until Member 3 populates live tables
+    // In production mode, if the database did not yield an authoritative record,
+    // do NOT silently fall back to mock data as confirmed coverage.
+    if (isProduction()) {
+      return {
+        status: 'UNAVAILABLE',
+        message: `Authoritative warranty record for serial '${cleanSerial}' is unavailable. Live Operations database connection required.`,
+        record: null,
+        isAuthoritativeDB: false
+      };
+    }
+
+    // Fallback adapter record permitted ONLY for dev/isolated testing
     const fallback = store.warranties.find(w => w.serial_number.toLowerCase() === cleanSerial.toLowerCase());
     if (fallback) {
       return this._evaluateDates(fallback, claimDate, false);

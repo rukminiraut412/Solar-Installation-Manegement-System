@@ -1,12 +1,32 @@
 /**
  * Razorpay Test-Mode Payment & Cryptographic Verification Service
  * Specification Authority: SOLAR_MANAGEMENT_SYSTEM.md (§7.7, §17, §20.1 T-25, T-28, T-29, T-30, T-32, T-33)
+ *
+ * Enforces server-side authority (client never specifies payment amount),
+ * constant-time cryptographic HMAC-SHA256 signature verification,
+ * raw-body webhook signature verification, and idempotent transaction processing.
  */
 
 import crypto from 'crypto';
 import { ENV } from '../../config/env.js';
 import { Repository } from './repository.js';
-import { store } from './store.js';
+
+const isProduction = () => (process.env.NODE_ENV === 'production' || ENV.NODE_ENV === 'production');
+
+/**
+ * Constant-time signature comparison to prevent timing side-channel attacks
+ */
+function safeTimingCompare(providedSig, expectedSig) {
+  if (!providedSig || !expectedSig) return false;
+  try {
+    const bufA = Buffer.from(providedSig, 'utf8');
+    const bufB = Buffer.from(expectedSig, 'utf8');
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+  } catch {
+    return false;
+  }
+}
 
 export const PaymentsService = {
   // 1. Create Payment Request with Idempotency Protection (§17.1, §17.4)
@@ -65,7 +85,7 @@ export const PaymentsService = {
       status: 'Created',
       razorpay_order_id: razorpayOrderId,
       idempotency_key,
-      is_test: true,
+      is_test: !isProduction(),
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -81,31 +101,52 @@ export const PaymentsService = {
 
   // 2. Client Callback Cryptographic Signature Verification (§17.3, §17.4, §20.1 T-28)
   async verifyCallbackSignature({ payment_request_id, razorpay_order_id, razorpay_payment_id, razorpay_signature }) {
+    if (!razorpay_signature || !razorpay_payment_id) {
+      const err = new Error('Missing payment verification parameters (razorpay_payment_id or razorpay_signature)');
+      err.code = 'INVALID_PAYMENT_SIGNATURE';
+      err.status = 400;
+      throw err;
+    }
+
     const request = await Repository.getPaymentRequestById(payment_request_id || razorpay_order_id);
 
     if (!request) {
-      const err = new Error('Payment request not found');
+      const err = new Error('Payment request not found for verification');
       err.code = 'NOT_FOUND';
       err.status = 404;
       throw err;
     }
 
     // Generate expected HMAC SHA256 signature using RAZORPAY_KEY_SECRET
-    const payload = `${razorpay_order_id}|${razorpay_payment_id}`;
+    const payload = `${request.razorpay_order_id || razorpay_order_id}|${razorpay_payment_id}`;
     const expectedSignature = crypto
       .createHmac('sha256', ENV.RAZORPAY_KEY_SECRET)
       .update(payload)
       .digest('hex');
 
-    // Constant-time signature comparison to prevent timing attacks
-    const isValid = (razorpay_signature === expectedSignature) || 
-      (ENV.RAZORPAY_MODE === 'test' && (razorpay_signature === 'simulated_hmac_sha256_valid' || razorpay_signature.startsWith('valid_test_sig_')));
+    // Constant-time signature comparison to eliminate timing side-channels
+    let isValid = safeTimingCompare(razorpay_signature, expectedSignature);
+
+    // Development/Test simulated signatures are strictly prohibited in production mode
+    if (!isValid && !isProduction() && ENV.RAZORPAY_MODE === 'test') {
+      isValid = (razorpay_signature === 'simulated_hmac_sha256_valid' || razorpay_signature.startsWith('valid_test_sig_'));
+    }
 
     if (!isValid) {
       const err = new Error('Cryptographic payment signature verification failed');
       err.code = 'INVALID_PAYMENT_SIGNATURE';
       err.status = 400;
       throw err;
+    }
+
+    // Idempotency: After cryptographic verification, if request is already paid, return existing state
+    if (request.status === 'Paid') {
+      return {
+        success: true,
+        status: 'ALREADY_PAID',
+        message: 'Payment request is already marked Paid (idempotent)',
+        request
+      };
     }
 
     // Record attempt
@@ -116,7 +157,7 @@ export const PaymentsService = {
       razorpay_payment_id,
       status: 'Captured',
       method_type: 'Checkout_Callback',
-      amount_paise: Number(request.amount_paise),
+      amount_paise: Number(request.amount_paise), // Server-side authoritative amount
       signature_verified: true,
       verified_via: 'CALLBACK',
       verified_at: new Date().toISOString()
@@ -149,8 +190,12 @@ export const PaymentsService = {
       .update(rawBody)
       .digest('hex');
 
-    const isValid = (signatureHeader === expectedSignature) || 
-      (ENV.RAZORPAY_MODE === 'test' && (signatureHeader.startsWith('valid_webhook_sig_') || signatureHeader === 'simulated_hmac_sha256_valid'));
+    let isValid = safeTimingCompare(signatureHeader, expectedSignature);
+
+    // Test bypass strictly prohibited in production mode
+    if (!isValid && !isProduction() && ENV.RAZORPAY_MODE === 'test') {
+      isValid = (signatureHeader.startsWith('valid_webhook_sig_') || signatureHeader === 'simulated_hmac_sha256_valid');
+    }
 
     if (!isValid) {
       const err = new Error('Webhook signature authentication failed');
@@ -189,7 +234,7 @@ export const PaymentsService = {
       const razorpayPaymentId = paymentEntity.id || `pay_wh_${Date.now()}`;
 
       const request = await Repository.getPaymentRequestById(razorpayOrderId);
-      if (request) {
+      if (request && request.status !== 'Paid') {
         const attempt = {
           id: `pa-wh-${Date.now()}`,
           payment_request_id: request.id,
@@ -228,7 +273,7 @@ export const PaymentsService = {
       status: 'VERIFIED',
       received_at: new Date().toISOString(),
       reference: attempt.razorpay_payment_id,
-      is_test: true,
+      is_test: !isProduction(),
       recorded_by: 'system'
     };
 
@@ -258,7 +303,7 @@ export const PaymentsService = {
       received_at: new Date().toISOString(),
       reference: `${method}: ${reference}`,
       proof_file_id: proof_file_id || 'file-proof-101',
-      is_test: true,
+      is_test: !isProduction(),
       recorded_by
     };
 

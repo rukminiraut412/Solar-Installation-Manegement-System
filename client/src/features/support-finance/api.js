@@ -1,12 +1,24 @@
 /**
  * API client for Support, Finance & AI module (/api/v1/support-finance)
+ * Prepared to use shared JWT Bearer token when available, while maintaining
+ * isolated development role fallback.
  */
 
 const BASE_URL = '/api/v1/support-finance';
 
 async function request(endpoint, options = {}, role = 'Admin') {
+  let token = null;
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      token = window.localStorage.getItem('token') || window.sessionStorage?.getItem('token');
+    }
+  } catch {
+    token = null;
+  }
+
   const headers = {
     'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     'x-user-role': role,
     'x-user-id': `USR-${role.toUpperCase()}-01`,
     'x-user-name': `${role} User`,

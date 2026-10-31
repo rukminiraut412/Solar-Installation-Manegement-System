@@ -1,8 +1,11 @@
 /**
  * Support, Finance & AI Request Controllers
  * Validates inputs, extracts authenticated context, and routes to domain services
+ * Never trusts client-supplied role or user headers in production mode.
  */
 
+import { ENV } from '../../config/env.js';
+import { query } from '../../db/connection.js';
 import { CasesService } from './cases.service.js';
 import { TicketsService } from './tickets.service.js';
 import { PaymentsService } from './payments.service.js';
@@ -11,11 +14,46 @@ import { DashboardsService } from './dashboards.service.js';
 import { AIService } from './ai.service.js';
 import { Repository } from './repository.js';
 
+const isProduction = () => (process.env.NODE_ENV === 'production' || ENV.NODE_ENV === 'production');
+
+/**
+ * Extracts authenticated user context safely.
+ * In production mode, client headers like x-role or x-user-role are completely ignored.
+ */
+function getUserContext(req) {
+  if (isProduction()) {
+    if (!req.user || !req.user.role) {
+      const err = new Error('Unauthorized: Valid authenticated session required in production');
+      err.code = 'UNAUTHORIZED';
+      err.statusCode = 401;
+      err.status = 401;
+      throw err;
+    }
+    return {
+      userId: req.user.id || 'usr-prod-anon',
+      role: req.user.role,
+      name: req.user.name || 'Authorized User'
+    };
+  }
+
+  // Development/Test fallback: Allowed only outside production
+  const role = req.user?.role || req.headers['x-role'] || req.headers['x-user-role'] || 'Admin';
+  const userId = req.user?.id || req.headers['x-user-id'] || 'usr-dev-01';
+  const name = req.user?.name || req.headers['x-user-name'] || 'Staff User';
+
+  return { userId, role, name };
+}
+
 export const SupportFinanceController = {
   // --- CASES & WORKFLOW ---
   async createCase(req, res, next) {
     try {
-      const result = await CasesService.createCase(req.body);
+      const userCtx = getUserContext(req);
+      const casePayload = {
+        ...req.body,
+        customer_id: req.body.customer_id || (userCtx.role === 'Customer' ? userCtx.userId : 'cus-001')
+      };
+      const result = await CasesService.createCase(casePayload);
       res.status(201).json({ success: true, case: result, data: result });
     } catch (err) {
       next(err);
@@ -24,10 +62,10 @@ export const SupportFinanceController = {
 
   async listCases(req, res, next) {
     try {
-      const role = req.user?.role || req.headers['x-role'] || req.headers['x-user-role'] || 'Admin';
+      const userCtx = getUserContext(req);
       const cases = await CasesService.listCases({
-        role,
-        customer_id: req.query.customer_id,
+        role: userCtx.role,
+        customer_id: req.query.customer_id || (userCtx.role === 'Customer' ? userCtx.userId : undefined),
         status: req.query.status,
         priority: req.query.priority
       });
@@ -39,8 +77,8 @@ export const SupportFinanceController = {
 
   async getCaseDetail(req, res, next) {
     try {
-      const role = req.user?.role || req.headers['x-role'] || req.headers['x-user-role'] || 'Admin';
-      const caseDetail = await CasesService.getCaseDetail(req.params.id, role);
+      const userCtx = getUserContext(req);
+      const caseDetail = await CasesService.getCaseDetail(req.params.id, userCtx.role);
       res.json({ success: true, case: caseDetail, data: caseDetail });
     } catch (err) {
       next(err);
@@ -49,12 +87,13 @@ export const SupportFinanceController = {
 
   async addMessage(req, res, next) {
     try {
-      const author_name = req.user?.name || req.headers['x-user-name'] || 'Staff';
-      const author_type = (req.user?.role || req.headers['x-user-role'] || 'SUPPORT').toUpperCase();
+      const userCtx = getUserContext(req);
+      const author_type = userCtx.role.toUpperCase() === 'CUSTOMER' ? 'CUSTOMER' : 'SUPPORT';
       const message = await CasesService.addMessage(req.params.id, {
         ...req.body,
-        author_name,
-        author_type: author_type === 'CUSTOMER' ? 'CUSTOMER' : 'SUPPORT'
+        author_id: userCtx.userId,
+        author_name: userCtx.name,
+        author_type
       });
       res.status(201).json({ success: true, message, data: message });
     } catch (err) {
@@ -98,8 +137,8 @@ export const SupportFinanceController = {
     try {
       const updated = await CasesService.technicianComplete(req.params.id, {
         technician_notes: req.body.findings || req.body.technician_notes,
-        technician_resolved: req.body.technician_resolved !== false,
-        parts_used: req.body.parts_replaced || req.body.parts_used || []
+        technician_resolved: req.body.resolved !== false,
+        parts_used: req.body.parts_used || []
       });
       res.json({ success: true, case: updated, data: updated });
     } catch (err) {
@@ -109,7 +148,10 @@ export const SupportFinanceController = {
 
   async supportReview(req, res, next) {
     try {
-      const updated = await CasesService.supportReview(req.params.id, req.body);
+      const updated = await CasesService.supportReview(req.params.id, {
+        accepted: req.body.accepted !== false,
+        notes: req.body.notes || req.body.review_notes
+      });
       res.json({ success: true, case: updated, data: updated });
     } catch (err) {
       next(err);
@@ -119,15 +161,10 @@ export const SupportFinanceController = {
   async customerConfirmation(req, res, next) {
     try {
       const updated = await CasesService.customerConfirmation(req.params.id, {
-        confirmed: req.body.confirmed,
-        dispute_notes: req.body.feedback || req.body.dispute_notes
+        confirmed: req.body.confirmed === true,
+        dispute_notes: req.body.dispute_notes || req.body.reason
       });
-      res.json({
-        success: true,
-        message: req.body.confirmed ? 'Customer confirmation verified. Case resolved.' : 'Customer disputed resolution. Case reopened.',
-        case: updated,
-        data: updated
-      });
+      res.json({ success: true, case: updated, data: updated });
     } catch (err) {
       next(err);
     }
@@ -135,37 +172,39 @@ export const SupportFinanceController = {
 
   async closeCase(req, res, next) {
     try {
+      const userCtx = getUserContext(req);
       const updated = await CasesService.closeCase(req.params.id, {
-        closure_notes: req.body.resolution_notes || req.body.closure_notes,
-        actorRole: req.user?.role || req.headers['x-role'] || 'Support'
+        closure_notes: req.body.closure_notes || req.body.notes,
+        actorRole: userCtx.role
       });
-      res.json({ success: true, message: 'Case successfully closed and archived.', case: updated, data: updated });
+      res.json({ success: true, case: updated, data: updated });
     } catch (err) {
       next(err);
     }
   },
 
-  // --- TICKETS & WARRANTY ---
-  async checkWarrantyEligibility(req, res, next) {
-    try {
-      const serial = req.params.serial || req.params.id || req.query.serial;
-      const result = await TicketsService.checkWarrantyEligibility(serial, req.query.claim_date);
-      res.json({ success: true, warranty: result, data: result });
-    } catch (err) {
-      next(err);
-    }
-  },
-
+  // --- SERVICE TICKETS & WARRANTY ---
   async getTicketByCaseId(req, res, next) {
     try {
-      const ticket = await Repository.getServiceTicketByCaseId(req.params.caseId);
+      let ticket = await Repository.getServiceTicketByCaseId(req.params.caseId);
       if (!ticket) {
-        // Automatically create ticket for case if not already present
-        const created = await TicketsService.createTicket({ case_id: req.params.caseId });
-        return res.json({ success: true, ticket: created, data: created });
+        ticket = await TicketsService.createTicket({ case_id: req.params.caseId });
       }
-      const charges = await Repository.getServiceCharges(ticket.ticket_code);
+      let charges = [];
+      if (ticket) {
+        charges = await Repository.getServiceCharges(ticket.ticket_code);
+      }
       res.json({ success: true, ticket: { ...ticket, charges }, data: { ...ticket, charges } });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async checkWarrantyEligibility(req, res, next) {
+    try {
+      const serial = req.params.serial || req.query.serial || 'INV-SN-887123';
+      const result = await TicketsService.checkWarrantyEligibility(serial);
+      res.json({ success: true, warranty: result, data: result });
     } catch (err) {
       next(err);
     }
@@ -182,12 +221,14 @@ export const SupportFinanceController = {
 
   async setCoverageDecision(req, res, next) {
     try {
-      const ticket = await TicketsService.setCoverageDecision(req.params.id, {
-        decision: req.body.coverage_decision || req.body.decision,
+      const userCtx = getUserContext(req);
+      const ticketId = req.params.id;
+      const updated = await TicketsService.setCoverageDecision(ticketId, {
+        decision: req.body.decision,
         reason: req.body.reason,
-        approver_role: req.user?.role || req.headers['x-role'] || 'Support'
+        approver_role: userCtx.role
       });
-      res.json({ success: true, ticket, data: ticket });
+      res.json({ success: true, ticket: updated, data: updated });
     } catch (err) {
       next(err);
     }
@@ -195,10 +236,9 @@ export const SupportFinanceController = {
 
   async addServiceCharge(req, res, next) {
     try {
-      const charge = await TicketsService.addCharge(req.params.id, req.body);
-      const ticket = await Repository.getServiceTicketByCodeOrId(req.params.id);
-      const charges = await Repository.getServiceCharges(ticket?.ticket_code || req.params.id);
-      res.status(201).json({ success: true, charge, ticket: { ...ticket, charges }, data: charge });
+      const ticketId = req.params.id;
+      const charge = await TicketsService.addCharge(ticketId, req.body);
+      res.status(201).json({ success: true, charge, data: charge });
     } catch (err) {
       next(err);
     }
@@ -216,22 +256,21 @@ export const SupportFinanceController = {
 
   async createPaymentRequest(req, res, next) {
     try {
-      const idempotencyKey = req.headers['idempotency-key'] || req.body.idempotency_key || `idem-${Date.now()}`;
+      const idempotencyKey = req.headers['idempotency-key'] || req.body.idempotency_key;
+      const order_id = req.body.order_id || req.body.request_id || 'ord-101';
+      const purpose = req.body.purpose || 'ADVANCE';
+
       const result = await PaymentsService.createPaymentRequest({
-        order_id: req.body.order_id || req.body.request_id || 'ord-101',
-        purpose: req.body.purpose || 'ADVANCE',
+        order_id,
+        purpose,
         idempotency_key: idempotencyKey
       });
-      const order = {
-        id: result.paymentRequest.razorpay_order_id,
-        amount: Number(result.paymentRequest.amount_paise),
-        currency: result.paymentRequest.currency
-      };
+
       res.status(result.isDuplicate ? 200 : 201).json({
         success: true,
-        order,
+        is_duplicate: result.isDuplicate,
+        payment_request: result.paymentRequest,
         key_id: result.key_id,
-        paymentRequest: result.paymentRequest,
         data: result
       });
     } catch (err) {
@@ -260,7 +299,15 @@ export const SupportFinanceController = {
 
   async handleWebhook(req, res, next) {
     try {
-      const signatureHeader = req.headers['x-razorpay-signature'] || 'simulated_hmac_sha256_valid';
+      const signatureHeader = req.headers['x-razorpay-signature'];
+      if (!signatureHeader) {
+        return res.status(400).json({
+          error: {
+            code: 'INVALID_WEBHOOK_SIGNATURE',
+            message: 'Header x-razorpay-signature is required for webhook signature verification'
+          }
+        });
+      }
       const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
       const result = await PaymentsService.processWebhook({
         rawBody,
@@ -289,13 +336,14 @@ export const SupportFinanceController = {
 
   async recordManualPayment(req, res, next) {
     try {
+      const userCtx = getUserContext(req);
       const payment = await PaymentsService.recordManualPayment({
         order_id: req.body.order_id,
         amount_paise: req.body.amount_paise || 5000000,
         method: req.body.method,
         reference: req.body.reference_number || req.body.reference,
         proof_file_id: req.body.proof_file_id,
-        recorded_by: req.user?.id || 'usr-admin'
+        recorded_by: userCtx.userId
       });
       res.status(201).json({
         success: true,
@@ -338,8 +386,9 @@ export const SupportFinanceController = {
 
   async approveExpense(req, res, next) {
     try {
+      const userCtx = getUserContext(req);
       const status = req.body.status || 'Approved';
-      const expense = await Repository.updateExpenseStatus(req.params.id, status, req.user?.id || 'usr-admin-01');
+      const expense = await Repository.updateExpenseStatus(req.params.id, status, userCtx.userId);
       res.json({ success: true, expense, data: expense });
     } catch (err) {
       next(err);
@@ -411,7 +460,8 @@ export const SupportFinanceController = {
   // --- DASHBOARDS ---
   async getDashboard(req, res, next) {
     try {
-      const role = req.params.role || req.user?.role || req.headers['x-role'] || req.headers['x-user-role'] || 'Admin';
+      const userCtx = getUserContext(req);
+      const role = req.params.role || userCtx.role;
       const data = await DashboardsService.getDashboardByRole(role);
       const metrics = {
         financial: {
@@ -461,10 +511,10 @@ export const SupportFinanceController = {
   // --- AI ASSISTANT ---
   async summarizeEntity(req, res, next) {
     try {
-      const callerRole = req.user?.role || req.headers['x-role'] || req.headers['x-user-role'] || 'Admin';
+      const userCtx = getUserContext(req);
       const entityType = req.body.entity_type || req.body.entityType || 'case';
       const entityId = req.body.entity_id || req.body.entityId || 'case-001';
-      const result = await AIService.summarizeEntity({ entityType, entityId, callerRole });
+      const result = await AIService.summarizeEntity({ entityType, entityId, callerRole: userCtx.role });
       res.json({
         success: true,
         summary_text: result.content,
@@ -517,8 +567,8 @@ export const SupportFinanceController = {
 
   async triageIssue(req, res, next) {
     try {
-      const query = req.body.query || req.body.description || '';
-      const result = await AIService.triageIssue({ description: query });
+      const queryText = req.body.query || req.body.description || '';
+      const result = await AIService.triageIssue({ description: queryText });
       res.json({
         success: true,
         response_text: result.guidance,
@@ -543,8 +593,8 @@ export const SupportFinanceController = {
       const text = `SELECT * FROM ai_requests ORDER BY created_at DESC LIMIT 20;`;
       let logs = [];
       try {
-        const resDb = await Repository.query(text, []);
-        logs = resDb.rows;
+        const resDb = await query(text, []);
+        logs = (resDb && resDb.rows) ? resDb.rows : [];
       } catch (e) {
         logs = [];
       }

@@ -6,12 +6,35 @@
  * Implements strict parameterized queries against PostgreSQL (via server/src/db/connection.js).
  * Never concatenates raw user input into SQL queries.
  * Provides transactional integrity for multi-step financial operations.
+ * Strictly prohibits silent in-memory fallback when running in production mode.
  */
 
+import { ENV } from '../../config/env.js';
 import { query, pool } from '../../db/connection.js';
 import { store } from './store.js';
 
 let isPostgresLive = null;
+
+const isProduction = () => (process.env.NODE_ENV === 'production' || ENV.NODE_ENV === 'production');
+
+function handleDbFailure(operation, err) {
+  if (isProduction()) {
+    const error = new Error(`[DB-PERSISTENCE-CRITICAL] Production database failure during '${operation}': ${err?.message || 'Connection unavailable'}. In-memory fallback is strictly prohibited in production mode.`);
+    error.code = 'DATABASE_PERSISTENCE_ERROR';
+    error.statusCode = 500;
+    error.status = 500;
+    throw error;
+  }
+  console.warn(`[REPO-SQL-NOTICE] ${operation} SQL fallback: ${err?.message || 'Offline'}`);
+}
+
+const ALLOWED_CASE_COLUMNS = new Set([
+  'case_code', 'customer_id', 'project_id', 'product_id', 'serial_item_id',
+  'source', 'description', 'category_ai', 'category_confirmed', 'priority',
+  'safety_flag', 'status', 'assigned_technician_id', 'scheduled_visit_at',
+  'technician_notes', 'technician_resolved', 'support_review_notes',
+  'customer_confirmed', 'dispute_notes', 'repeat_count', 'closure_notes'
+]);
 
 export const Repository = {
   /**
@@ -20,7 +43,7 @@ export const Repository = {
   async checkDatabaseHealth() {
     try {
       const res = await query('SELECT 1 as live_check');
-      const live = res && res.rows && res.rows.length > 0;
+      const live = Boolean(res && res.rows && res.rows.length > 0);
       isPostgresLive = live;
       return { isLive: live, error: live ? null : 'Query returned empty (connection in fallback mode)' };
     } catch (err) {
@@ -84,14 +107,17 @@ export const Repository = {
 
     try {
       const res = await query(text, params);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction()) {
+        handleDbFailure('createCase', new Error('Database insert returned no rows.'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] createCase SQL fallback: ${err.message}`);
+      handleDbFailure('createCase', err);
     }
 
-    // Isolated test/fallback mirror
+    // Isolated test/dev fallback mirror
     store.cases.unshift(caseData);
     return caseData;
   },
@@ -120,14 +146,21 @@ export const Repository = {
 
     try {
       const res = await query(text, params);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows;
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('listCases', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] listCases SQL fallback: ${err.message}`);
+      handleDbFailure('listCases', err);
     }
 
-    // Isolated test/fallback mirror
+    if (isProduction()) {
+      return [];
+    }
+
+    // Isolated test/dev fallback mirror
     let list = [...store.cases];
     if (role === 'Customer') {
       list = list.filter(c => c.customer_id === (customer_id || 'cus-001'));
@@ -153,18 +186,26 @@ export const Repository = {
     `;
     try {
       const res = await query(text, [caseId]);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('getCaseById', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] getCaseById SQL fallback: ${err.message}`);
+      handleDbFailure('getCaseById', err);
+    }
+
+    if (isProduction()) {
+      return null;
     }
 
     return store.cases.find(c => c.id === caseId || c.case_code === caseId) || null;
   },
 
   async updateCase(caseId, updates = {}) {
-    const fields = Object.keys(updates);
+    // Sanitize and allowlist fields to prevent SQL injection via column names
+    const fields = Object.keys(updates).filter(f => ALLOWED_CASE_COLUMNS.has(f));
     if (fields.length === 0) return this.getCaseById(caseId);
 
     const setClauses = fields.map((f, idx) => `"${f}" = $${idx + 2}`).join(', ');
@@ -174,15 +215,22 @@ export const Repository = {
       WHERE id = $1 OR case_code = $1
       RETURNING *;
     `;
-    const params = [caseId, ...Object.values(updates)];
+    const params = [caseId, ...fields.map(f => updates[f])];
 
     try {
       const res = await query(text, params);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction()) {
+        handleDbFailure('updateCase', new Error('Database update returned no rows.'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] updateCase SQL fallback: ${err.message}`);
+      handleDbFailure('updateCase', err);
+    }
+
+    if (isProduction()) {
+      return null;
     }
 
     const c = store.cases.find(item => item.id === caseId || item.case_code === caseId);
@@ -215,11 +263,14 @@ export const Repository = {
 
     try {
       const res = await query(text, params);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction()) {
+        handleDbFailure('createMessage', new Error('Database insert returned no rows.'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] createMessage SQL fallback: ${err.message}`);
+      handleDbFailure('createMessage', err);
     }
 
     store.caseMessages.push(msgData);
@@ -239,11 +290,18 @@ export const Repository = {
 
     try {
       const res = await query(text, params);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows;
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('getMessagesByCaseId', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] getMessagesByCaseId SQL fallback: ${err.message}`);
+      handleDbFailure('getMessagesByCaseId', err);
+    }
+
+    if (isProduction()) {
+      return [];
     }
 
     let msgs = store.caseMessages.filter(m => m.case_id === caseId);
@@ -276,11 +334,14 @@ export const Repository = {
 
     try {
       const res = await query(text, params);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction()) {
+        handleDbFailure('createServiceTicket', new Error('Database insert returned no rows.'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] createServiceTicket SQL fallback: ${err.message}`);
+      handleDbFailure('createServiceTicket', err);
     }
 
     store.serviceTickets.push(ticketData);
@@ -295,11 +356,18 @@ export const Repository = {
     `;
     try {
       const res = await query(text, [caseId]);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('getServiceTicketByCaseId', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] getServiceTicketByCaseId SQL fallback: ${err.message}`);
+      handleDbFailure('getServiceTicketByCaseId', err);
+    }
+
+    if (isProduction()) {
+      return null;
     }
 
     return store.serviceTickets.find(t => t.case_id === caseId) || null;
@@ -313,11 +381,18 @@ export const Repository = {
     `;
     try {
       const res = await query(text, [codeOrId]);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('getServiceTicketByCodeOrId', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] getServiceTicketByCodeOrId SQL fallback: ${err.message}`);
+      handleDbFailure('getServiceTicketByCodeOrId', err);
+    }
+
+    if (isProduction()) {
+      return null;
     }
 
     return store.serviceTickets.find(t => t.ticket_code === codeOrId || t.id === codeOrId) || null;
@@ -332,11 +407,18 @@ export const Repository = {
     `;
     try {
       const res = await query(text, [ticketCodeOrId, decision]);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction()) {
+        handleDbFailure('updateCoverageDecision', new Error('Database update returned no rows.'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] updateCoverageDecision SQL fallback: ${err.message}`);
+      handleDbFailure('updateCoverageDecision', err);
+    }
+
+    if (isProduction()) {
+      return null;
     }
 
     const t = store.serviceTickets.find(item => item.ticket_code === ticketCodeOrId || item.id === ticketCodeOrId);
@@ -365,11 +447,14 @@ export const Repository = {
 
     try {
       const res = await query(text, params);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction()) {
+        handleDbFailure('createServiceCharge', new Error('Database insert returned no rows.'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] createServiceCharge SQL fallback: ${err.message}`);
+      handleDbFailure('createServiceCharge', err);
     }
 
     store.serviceCharges.push(chargeData);
@@ -384,11 +469,18 @@ export const Repository = {
     `;
     try {
       const res = await query(text, [ticketCode]);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows;
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('getServiceCharges', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] getServiceCharges SQL fallback: ${err.message}`);
+      handleDbFailure('getServiceCharges', err);
+    }
+
+    if (isProduction()) {
+      return [];
     }
 
     return store.serviceCharges.filter(sc => sc.ticket_code === ticketCode);
@@ -422,11 +514,14 @@ export const Repository = {
 
     try {
       const res = await query(text, params);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction()) {
+        handleDbFailure('createPaymentRequest', new Error('Database insert returned no rows.'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] createPaymentRequest SQL fallback: ${err.message}`);
+      handleDbFailure('createPaymentRequest', err);
     }
 
     store.paymentRequests.push(reqData);
@@ -441,11 +536,18 @@ export const Repository = {
     `;
     try {
       const res = await query(text, [orderId, purpose, idempotencyKey]);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('getPaymentRequestByIdempotency', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] getPaymentRequestByIdempotency SQL fallback: ${err.message}`);
+      handleDbFailure('getPaymentRequestByIdempotency', err);
+    }
+
+    if (isProduction()) {
+      return null;
     }
 
     return store.paymentRequests.find(
@@ -461,11 +563,18 @@ export const Repository = {
     `;
     try {
       const res = await query(text, [idOrOrderId]);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('getPaymentRequestById', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] getPaymentRequestById SQL fallback: ${err.message}`);
+      handleDbFailure('getPaymentRequestById', err);
+    }
+
+    if (isProduction()) {
+      return null;
     }
 
     return store.paymentRequests.find(pr => pr.id === idOrOrderId || pr.razorpay_order_id === idOrOrderId) || null;
@@ -478,11 +587,18 @@ export const Repository = {
     `;
     try {
       const res = await query(text, []);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows;
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('listPaymentRequests', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] listPaymentRequests SQL fallback: ${err.message}`);
+      handleDbFailure('listPaymentRequests', err);
+    }
+
+    if (isProduction()) {
+      return [];
     }
 
     return [...store.paymentRequests];
@@ -511,11 +627,14 @@ export const Repository = {
 
     try {
       const res = await query(text, params);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction()) {
+        handleDbFailure('createPaymentAttempt', new Error('Database insert returned no rows.'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] createPaymentAttempt SQL fallback: ${err.message}`);
+      handleDbFailure('createPaymentAttempt', err);
     }
 
     store.paymentAttempts.push(attemptData);
@@ -570,14 +689,14 @@ export const Repository = {
       if (client) {
         await client.query('ROLLBACK').catch(() => {});
       }
-      console.warn(`[REPO-SQL-NOTICE] Transaction fallback: ${err.message}`);
+      handleDbFailure('applyVerifiedPaymentTransaction', err);
     } finally {
       if (client) {
         client.release();
       }
     }
 
-    // Isolated test/fallback mirror
+    // Isolated test/dev fallback mirror
     const existingP = store.payments.find(p => p.id === paymentData.id || (paymentData.reference && p.reference === paymentData.reference));
     if (!existingP) {
       store.payments.push(paymentData);
@@ -597,11 +716,18 @@ export const Repository = {
     `;
     try {
       const res = await query(text, []);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows;
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('listVerifiedPayments', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] listVerifiedPayments SQL fallback: ${err.message}`);
+      handleDbFailure('listVerifiedPayments', err);
+    }
+
+    if (isProduction()) {
+      return [];
     }
 
     return store.payments.filter(p => p.status === 'VERIFIED');
@@ -628,11 +754,14 @@ export const Repository = {
 
     try {
       const res = await query(text, params);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction()) {
+        handleDbFailure('recordWebhookEvent', new Error('Database insert returned no rows.'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] recordWebhookEvent SQL fallback: ${err.message}`);
+      handleDbFailure('recordWebhookEvent', err);
     }
 
     store.webhookEvents.set(eventData.provider_event_id, eventData);
@@ -647,11 +776,18 @@ export const Repository = {
     `;
     try {
       const res = await query(text, [providerEventId]);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('getWebhookEvent', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] getWebhookEvent SQL fallback: ${err.message}`);
+      handleDbFailure('getWebhookEvent', err);
+    }
+
+    if (isProduction()) {
+      return null;
     }
 
     return store.webhookEvents.get(providerEventId) || null;
@@ -673,7 +809,7 @@ export const Repository = {
     `;
     try {
       const res = await query(text, []);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows.map(inv => {
           const total = Number(inv.total_paise);
           const paid = Number(inv.verified_paid_paise);
@@ -690,11 +826,18 @@ export const Repository = {
           };
         });
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('listInvoices', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] listInvoices SQL fallback: ${err.message}`);
+      handleDbFailure('listInvoices', err);
     }
 
-    // In-memory fallback
+    if (isProduction()) {
+      return [];
+    }
+
+    // In-memory fallback for dev
     return store.invoices.map(inv => {
       const paid = store.payments
         .filter(p => p.order_id === inv.order_id && p.status === 'VERIFIED')
@@ -723,11 +866,18 @@ export const Repository = {
 
     try {
       const res = await query(text, params);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows;
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('listExpenses', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] listExpenses SQL fallback: ${err.message}`);
+      handleDbFailure('listExpenses', err);
+    }
+
+    if (isProduction()) {
+      return [];
     }
 
     if (projectId) {
@@ -757,11 +907,14 @@ export const Repository = {
 
     try {
       const res = await query(text, params);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction()) {
+        handleDbFailure('createExpense', new Error('Database insert returned no rows.'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] createExpense SQL fallback: ${err.message}`);
+      handleDbFailure('createExpense', err);
     }
 
     store.expenses.push(expData);
@@ -777,11 +930,18 @@ export const Repository = {
     `;
     try {
       const res = await query(text, [expenseId, status, approverId]);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction()) {
+        handleDbFailure('updateExpenseStatus', new Error('Database update returned no rows.'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] updateExpenseStatus SQL fallback: ${err.message}`);
+      handleDbFailure('updateExpenseStatus', err);
+    }
+
+    if (isProduction()) {
+      return null;
     }
 
     const exp = store.expenses.find(e => e.id === expenseId);
@@ -800,11 +960,18 @@ export const Repository = {
     `;
     try {
       const res = await query(text, []);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows;
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('listTechnicianPay', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] listTechnicianPay SQL fallback: ${err.message}`);
+      handleDbFailure('listTechnicianPay', err);
+    }
+
+    if (isProduction()) {
+      return [];
     }
 
     return [...store.technicianPayRecords];
@@ -818,20 +985,27 @@ export const Repository = {
     `;
     try {
       const res = await query(text, [projectId]);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('getSubsidyStatus', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] getSubsidyStatus SQL fallback: ${err.message}`);
+      handleDbFailure('getSubsidyStatus', err);
+    }
+
+    if (isProduction()) {
+      return null;
     }
 
     return store.subsidyApplications.find(s => s.project_id === projectId) || store.subsidyApplications[0];
   },
 
   async updateSubsidyChecklist(projectId, updates = {}) {
-    const current = await this.getSubsidyStatus(projectId);
-    const updatedChecklist = updates.checklist ? { ...(current.checklist || {}), ...updates.checklist } : current.checklist;
-    const status = updates.status || current.status;
+    const current = await this.getSubsidyStatus(projectId) || {};
+    const updatedChecklist = updates.checklist ? { ...(current.checklist || {}), ...updates.checklist } : (current.checklist || {});
+    const status = updates.status || current.status || 'Draft';
 
     const text = `
       INSERT INTO subsidy_applications (
@@ -853,11 +1027,18 @@ export const Repository = {
 
     try {
       const res = await query(text, params);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction()) {
+        handleDbFailure('updateSubsidyChecklist', new Error('Database update returned no rows.'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] updateSubsidyChecklist SQL fallback: ${err.message}`);
+      handleDbFailure('updateSubsidyChecklist', err);
+    }
+
+    if (isProduction()) {
+      return null;
     }
 
     current.checklist = updatedChecklist;
@@ -889,11 +1070,14 @@ export const Repository = {
 
     try {
       const res = await query(text, params);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows[0];
       }
+      if (isProduction()) {
+        handleDbFailure('recordAIRequest', new Error('Database insert returned no rows.'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] recordAIRequest SQL fallback: ${err.message}`);
+      handleDbFailure('recordAIRequest', err);
     }
 
     store.aiRequests.push(aiData);
@@ -908,11 +1092,18 @@ export const Repository = {
     `;
     try {
       const res = await query(text, []);
-      if (res.rows && res.rows.length > 0) {
+      if (res && res.rows && res.rows.length > 0) {
         return res.rows;
       }
+      if (isProduction() && isPostgresLive === false) {
+        handleDbFailure('listApprovedHelpArticles', new Error('Database disconnected'));
+      }
     } catch (err) {
-      console.warn(`[REPO-SQL-NOTICE] listApprovedHelpArticles SQL fallback: ${err.message}`);
+      handleDbFailure('listApprovedHelpArticles', err);
+    }
+
+    if (isProduction()) {
+      return [];
     }
 
     return store.helpArticles.filter(a => a.status === 'Approved');

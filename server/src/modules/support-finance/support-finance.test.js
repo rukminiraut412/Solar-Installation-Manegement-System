@@ -10,8 +10,14 @@ import { AIService } from './ai.service.js';
 import { evaluateSafety, FIXED_SAFETY_NOTICE } from './safety.js';
 import { Repository } from './repository.js';
 import { WarrantyAdapter } from './warranty.adapter.js';
+import { SupportFinanceController } from './controller.js';
+import { requireRole } from '../../middleware/auth.middleware.js';
 import routes from './routes.js';
 import { ENV } from '../../config/env.js';
+
+// ====================================================================
+// SECTION A: BASELINE FUNCTIONALITY & WORKFLOW TESTS (MOCKED / ISOLATED)
+// ====================================================================
 
 test('1. Safety Interceptor: Pre-Model Emergency Hazard Detection (§9.3, AC-8)', () => {
   // Test hazardous query
@@ -369,7 +375,7 @@ test('12. Database Repository Layer & Connectivity Probe (§7.6, §103_support_f
   const probe = await Repository.checkDatabaseHealth();
   assert.equal(typeof probe.isLive, 'boolean');
 
-  // Verify Repository methods execute without throwing
+  // Verify Repository methods execute without throwing in test mode
   const cases = await Repository.listCases({ role: 'Admin' });
   assert.ok(Array.isArray(cases));
 
@@ -397,4 +403,159 @@ test('14. Route Harmonization: Verify Router Exports All Bound Endpoints', () =>
   assert.ok(routes);
   assert.equal(typeof routes, 'function'); // Express Router function
   assert.ok(routes.stack.length >= 25, 'Harmonized router must export all bound endpoints');
+});
+
+// ====================================================================
+// SECTION B: SECURITY HARDENING & INTEGRATION READINESS TESTS (AUDIT PHASE 8)
+// ====================================================================
+
+test('15. Security: Production Mode Prohibits Silent In-Memory DB Fallback', async () => {
+  const originalEnv = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'production';
+
+    // In production mode, attempting to write without a live PostgreSQL connection MUST fail loudly
+    await assert.rejects(async () => {
+      await Repository.createCase({
+        id: `case-prod-fail-${Date.now()}`,
+        case_code: 'CAS-PROD-999',
+        customer_id: 'cus-prod',
+        description: 'Testing strict fail-fast in production'
+      });
+    }, (err) => {
+      assert.equal(err.code, 'DATABASE_PERSISTENCE_ERROR');
+      assert.equal(err.statusCode, 500);
+      assert.ok(err.message.includes('In-memory fallback is strictly prohibited in production mode'));
+      return true;
+    });
+  } finally {
+    process.env.NODE_ENV = originalEnv;
+  }
+});
+
+test('16. Security: Production Mode Prohibits In-Memory Warranty Fallback', async () => {
+  const originalEnv = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'production';
+
+    // In production mode, if Operations DB is offline, it must return UNAVAILABLE rather than mock fixture
+    const res = await WarrantyAdapter.checkEligibility('INV-SN-887123');
+    assert.equal(res.status, 'UNAVAILABLE');
+    assert.equal(res.isAuthoritativeDB, false);
+    assert.ok(res.message.includes('Live Operations database connection required'));
+  } finally {
+    process.env.NODE_ENV = originalEnv;
+  }
+});
+
+test('17. Security: Payment Tampering & Cryptographic Rejection', async () => {
+  // Test 1: Webhook with forged/tampered signature is rejected
+  const payload = { event: 'payment.captured', id: 'evt-tamper-1' };
+  const rawBody = Buffer.from(JSON.stringify(payload));
+  const forgedSig = crypto.createHmac('sha256', 'wrong-attacker-secret').update(rawBody).digest('hex');
+
+  await assert.rejects(async () => {
+    await PaymentsService.processWebhook({
+      rawBody,
+      signatureHeader: forgedSig,
+      eventPayload: payload
+    });
+  }, (err) => {
+    assert.equal(err.code, 'INVALID_WEBHOOK_SIGNATURE');
+    assert.equal(err.status, 400);
+    return true;
+  });
+
+  // Test 2: Webhook with missing signature is rejected
+  await assert.rejects(async () => {
+    await PaymentsService.processWebhook({
+      rawBody,
+      signatureHeader: null,
+      eventPayload: payload
+    });
+  }, (err) => {
+    assert.equal(err.code, 'INVALID_WEBHOOK_SIGNATURE');
+    assert.equal(err.status, 400);
+    return true;
+  });
+
+  // Test 3: Missing parameters on callback verification
+  await assert.rejects(async () => {
+    await PaymentsService.verifyCallbackSignature({
+      payment_request_id: 'pr-any',
+      razorpay_order_id: 'ord-any',
+      razorpay_payment_id: null,
+      razorpay_signature: null
+    });
+  }, (err) => {
+    assert.equal(err.code, 'INVALID_PAYMENT_SIGNATURE');
+    assert.equal(err.status, 400);
+    return true;
+  });
+});
+
+test('18. Security: Webhook Requires Valid Signature Header', async () => {
+  // Test controller rejection when x-razorpay-signature is missing
+  const fakeReq = {
+    headers: {},
+    body: { id: 'evt-test-missing-sig' }
+  };
+  let capturedStatus = null;
+  let capturedBody = null;
+  const fakeRes = {
+    status(code) {
+      capturedStatus = code;
+      return this;
+    },
+    json(data) {
+      capturedBody = data;
+      return this;
+    }
+  };
+
+  await SupportFinanceController.handleWebhook(fakeReq, fakeRes, () => {});
+  assert.equal(capturedStatus, 400);
+  assert.equal(capturedBody?.error?.code, 'INVALID_WEBHOOK_SIGNATURE');
+});
+
+test('19. Security: RBAC Enforcement with requireRole Middleware', () => {
+  const adminGuard = requireRole(['Admin']);
+
+  // Case 1: Unauthorized user (no req.user)
+  const reqUnauth = {};
+  let status1 = null;
+  const res1 = {
+    status(c) { status1 = c; return this; },
+    json() { return this; }
+  };
+  adminGuard(reqUnauth, res1, () => {});
+  assert.equal(status1, 401);
+
+  // Case 2: Forbidden role (Customer trying to access Admin action)
+  const reqCustomer = { user: { id: 'c-01', role: 'Customer' } };
+  let status2 = null;
+  const res2 = {
+    status(c) { status2 = c; return this; },
+    json() { return this; }
+  };
+  adminGuard(reqCustomer, res2, () => {});
+  assert.equal(status2, 403);
+
+  // Case 3: Authorized Admin
+  const reqAdmin = { user: { id: 'a-01', role: 'Admin' } };
+  let nextCalled = false;
+  adminGuard(reqAdmin, {}, () => { nextCalled = true; });
+  assert.equal(nextCalled, true);
+});
+
+test('20. Security: AI Safety Non-Commitment and Mutation Barrier', async () => {
+  // Verify AIService exposes zero mutation methods
+  assert.equal(typeof AIService.approvePayment, 'undefined');
+  assert.equal(typeof AIService.changeStock, 'undefined');
+  assert.equal(typeof AIService.decideWarrantyCoverage, 'undefined');
+  assert.equal(typeof AIService.closeCase, 'undefined');
+
+  // Verify Warranty Explanation strictly defers final coverage to human technical staff
+  const explanation = await AIService.explainWarranty({ serialNumber: 'INV-SN-887123' });
+  assert.ok(explanation.explanation.includes('final coverage is confirmed upon technical review by Support'));
 });
