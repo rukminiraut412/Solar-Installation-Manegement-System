@@ -3,14 +3,14 @@
  * Specification Authority: SOLAR_MANAGEMENT_SYSTEM.md (§13.1, §13.2, §13.3, §20.1 T-24, §20.2 AC-9)
  */
 
-import { store } from './store.js';
+import { Repository } from './repository.js';
 import { FinanceService } from './finance.service.js';
 
 export const DashboardsService = {
   // Authoritative Payment Reconciliation Widget (§13.1, §20.1 T-24)
-  getPaymentReconciliation() {
-    const verifiedPayments = store.payments.filter(p => p.status === 'VERIFIED');
-    const totalVerifiedPaise = verifiedPayments.reduce((sum, p) => sum + p.amount_paise, 0);
+  async getPaymentReconciliation() {
+    const verifiedPayments = await Repository.listVerifiedPayments();
+    const totalVerifiedPaise = verifiedPayments.reduce((sum, p) => sum + Number(p.amount_paise), 0);
 
     // Dashboard aggregated metric computation
     const dashboardReportedTotalPaise = totalVerifiedPaise;
@@ -27,17 +27,20 @@ export const DashboardsService = {
   },
 
   // Role-Specific Metrics
-  getDashboardByRole(role = 'Admin') {
-    const reconciliation = this.getPaymentReconciliation();
-    const profitability = FinanceService.getProjectProfitability('prj-101');
+  async getDashboardByRole(role = 'Admin') {
+    const reconciliation = await this.getPaymentReconciliation();
+    const profitability = await FinanceService.getProjectProfitability('prj-101');
+    const invoices = await Repository.listInvoices();
+    const allCases = await Repository.listCases({ role: 'Admin' });
+    const verifiedPayments = await Repository.listVerifiedPayments();
 
-    const totalRevenuePaise = store.invoices.reduce((sum, inv) => sum + inv.total_paise, 0);
+    const totalRevenuePaise = invoices.reduce((sum, inv) => sum + Number(inv.total_paise), 0);
     const totalVerifiedPaidPaise = reconciliation.sum_verified_ledger_paise;
     const totalOutstandingPaise = Math.max(0, totalRevenuePaise - totalVerifiedPaidPaise);
 
-    const openCasesCount = store.cases.filter(c => c.status !== 'Closed' && c.status !== 'Cancelled').length;
-    const p1AlertsCount = store.cases.filter(c => c.priority === 'P1' && c.status !== 'Closed').length;
-    const awaitingCustomerConfirmationCount = store.cases.filter(c => c.status === 'Awaiting Customer Confirmation').length;
+    const openCasesCount = allCases.filter(c => c.status !== 'Closed' && c.status !== 'Cancelled').length;
+    const p1AlertsCount = allCases.filter(c => c.priority === 'P1' && c.status !== 'Closed').length;
+    const awaitingCustomerConfirmationCount = allCases.filter(c => c.status === 'Awaiting Customer Confirmation').length;
 
     // Monthly trends for Recharts
     const monthlyFinancials = [
@@ -75,8 +78,8 @@ export const DashboardsService = {
         monthly_financials: monthlyFinancials,
         case_categories: caseCategoryDistribution
       },
-      recent_cases: store.cases.slice(0, 5),
-      recent_payments: store.payments.slice(0, 5)
+      recent_cases: allCases.slice(0, 5),
+      recent_payments: verifiedPayments.slice(0, 5)
     };
   }
 };

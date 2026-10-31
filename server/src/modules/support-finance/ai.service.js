@@ -3,21 +3,21 @@
  * Specification Authority: SOLAR_MANAGEMENT_SYSTEM.md (§8, §9.2, §16.10, §20.1 T-35, T-36, T-37, T-38, T-39)
  */
 
-import crypto from 'crypto';
-import { store } from './store.js';
 import { evaluateSafety, FIXED_SAFETY_NOTICE } from './safety.js';
 import { TicketsService } from './tickets.service.js';
+import { Repository } from './repository.js';
 
 export const AIService = {
   // 1. AI Enquiry/Case Summarization (AI-A1, AI-D1 §8.2)
-  summarizeEntity({ entityType = 'case', entityId = 'case-001', callerRole = 'Admin' }) {
+  async summarizeEntity({ entityType = 'case', entityId = 'case-001', callerRole = 'Admin' }) {
     const startTime = Date.now();
     let entity = null;
 
     if (entityType === 'case') {
-      entity = store.cases.find(c => c.id === entityId || c.case_code === entityId);
+      entity = await Repository.getCaseById(entityId);
     } else {
-      entity = store.invoices.find(i => i.id === entityId);
+      const invoices = await Repository.listInvoices();
+      entity = invoices.find(i => i.id === entityId);
     }
 
     if (!entity) {
@@ -35,11 +35,11 @@ export const AIService = {
       throw err;
     }
 
-    const messages = store.caseMessages.filter(m => m.case_id === entity.id && (callerRole !== 'Customer' || m.visibility === 'CUSTOMER'));
+    const messages = await Repository.getMessagesByCaseId(entity.id, callerRole === 'Customer');
     
     // Deterministic grounded summary from authoritative records
     const summaryText = 
-      `Customer ${entity.customer_name} reported an issue regarding ${entity.product_name} (Serial: ${entity.serial_item_id || 'N/A'}). ` +
+      `Customer ${entity.customer_name || 'Customer'} reported an issue regarding ${entity.product_name || 'Solar Equipment'} (Serial: ${entity.serial_item_id || 'N/A'}). ` +
       `Current case status is '${entity.status}' with priority '${entity.priority}'. ` +
       `Total messages exchanged: ${messages.length}. ` +
       (entity.safety_flag ? 'CRITICAL: Safety hazard flag is ACTIVE.' : 'No active fire/shock hazards detected.') +
@@ -58,7 +58,7 @@ export const AIService = {
       proposedActions.push({ label: 'Request Customer Confirmation', endpoint: `/api/v1/support-finance/cases/${entity.id}/support-review` });
     }
 
-    this.logTelemetry({
+    await this.logTelemetry({
       feature: 'ENTITY_SUMMARY',
       entityRefs: sources,
       status: 'SUCCESS',
@@ -108,10 +108,10 @@ export const AIService = {
   },
 
   // 3. Plain-Language Warranty Explanation (AI-E1 §8.2, §20.1 T-20)
-  explainWarranty({ serialNumber = 'INV-SN-887123', claimDate = new Date().toISOString().split('T')[0] }) {
+  async explainWarranty({ serialNumber = 'INV-SN-887123', claimDate = new Date().toISOString().split('T')[0] }) {
     const startTime = Date.now();
-    // Authoritative backend system result
-    const sysResult = TicketsService.checkWarrantyEligibility(serialNumber, claimDate);
+    // Authoritative backend system result via WarrantyAdapter
+    const sysResult = await TicketsService.checkWarrantyEligibility(serialNumber, claimDate);
 
     let explanationText = '';
     if (sysResult.status === 'WITHIN_PERIOD') {
@@ -128,7 +128,7 @@ export const AIService = {
       explanationText = sysResult.message;
     }
 
-    this.logTelemetry({
+    await this.logTelemetry({
       feature: 'WARRANTY_EXPLAIN',
       entityRefs: [{ serial: serialNumber, status: sysResult.status }],
       status: 'SUCCESS',
@@ -148,7 +148,7 @@ export const AIService = {
   },
 
   // 4. Customer Support Guided Triage (AI-G1 §8.2, §9.2)
-  triageIssue({ description = '', equipment_type = 'Inverter' }) {
+  async triageIssue({ description = '', equipment_type = 'Inverter' }) {
     const startTime = Date.now();
 
     // STEP 1: Safety screening first (§9.3)
@@ -168,7 +168,8 @@ export const AIService = {
     }
 
     // STEP 2: Grounded guidance derived strictly from approved articles (§9.2, §16.10)
-    const matchedArticles = store.helpArticles.filter(art => {
+    const helpArticles = await Repository.listApprovedHelpArticles();
+    const matchedArticles = helpArticles.filter(art => {
       const kw = art.category.toLowerCase();
       return description.toLowerCase().includes(kw) || kw === equipment_type.toLowerCase();
     });
@@ -185,7 +186,7 @@ export const AIService = {
         'we have routed your case to our Senior Support Lead for review. You may request immediate support assistance at any time.';
     }
 
-    this.logTelemetry({
+    await this.logTelemetry({
       feature: 'SUPPORT_TRIAGE',
       entityRefs: matchedArticles.map(a => ({ type: 'help_articles', id: a.id })),
       status: 'SUCCESS',
@@ -206,15 +207,15 @@ export const AIService = {
   },
 
   // Telemetry helper (No raw customer prompts stored §15.4)
-  logTelemetry({ feature, entityRefs, status, latencyMs }) {
-    store.aiRequests.push({
+  async logTelemetry({ feature, entityRefs, status, latencyMs }) {
+    return Repository.recordAIRequest({
       id: `ai-req-${Date.now()}`,
       feature,
       entity_refs: entityRefs,
       provider_mode: 'mock',
       status,
       latency_ms: latencyMs,
-      timestamp: new Date().toISOString()
+      created_at: new Date().toISOString()
     });
   }
 };

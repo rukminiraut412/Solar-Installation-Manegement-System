@@ -3,65 +3,21 @@
  * Specification Authority: SOLAR_MANAGEMENT_SYSTEM.md (§7.5, §7.6, §20.1 T-18, T-19)
  */
 
-import { store } from './store.js';
+import { Repository } from './repository.js';
+import { WarrantyAdapter } from './warranty.adapter.js';
 
 export const TicketsService = {
-  // 1. Warranty Eligibility Lookup (Contract with Operations Module)
-  checkWarrantyEligibility(serialNumber, claimDate = new Date().toISOString().split('T')[0]) {
-    const record = store.warranties.find(w => w.serial_number.toLowerCase() === (serialNumber || '').trim().toLowerCase());
-    
-    if (!record) {
-      return {
-        status: 'NO_RECORD',
-        message: 'No warranty record found for this serial number.',
-        record: null
-      };
-    }
-
-    if (record.status === 'Void') {
-      return {
-        status: 'VOID',
-        message: 'Warranty has been voided by administration.',
-        record
-      };
-    }
-
-    if (record.status === 'Pending Activation' || new Date(claimDate) < new Date(record.start_date)) {
-      return {
-        status: 'NOT_ACTIVE',
-        message: 'Warranty is pending activation or start date is in the future.',
-        record
-      };
-    }
-
-    if (new Date(claimDate) > new Date(record.end_date)) {
-      return {
-        status: 'EXPIRED',
-        message: `Warranty expired on ${record.end_date}.`,
-        record,
-        expiredDays: Math.floor((new Date(claimDate) - new Date(record.end_date)) / 86400000)
-      };
-    }
-
-    // Active within period!
-    const remainingDays = Math.floor((new Date(record.end_date) - new Date(claimDate)) / 86400000);
-    const remainingMonths = (remainingDays / 30.4).toFixed(1);
-
-    return {
-      status: 'WITHIN_PERIOD',
-      message: `Warranty is active with ~${remainingMonths} months (${remainingDays} days) remaining.`,
-      record,
-      remainingDays,
-      remainingMonths: Number(remainingMonths)
-    };
+  // 1. Warranty Eligibility Lookup (Isolated Adapter for Operations Module)
+  async checkWarrantyEligibility(serialNumber, claimDate = new Date().toISOString().split('T')[0]) {
+    return WarrantyAdapter.checkEligibility(serialNumber, claimDate);
   },
 
   // 2. Create service ticket linked to case
-  createTicket({ case_id, serial_item_id }) {
-    const existing = store.serviceTickets.find(t => t.case_id === case_id);
+  async createTicket({ case_id, serial_item_id }) {
+    const existing = await Repository.getServiceTicketByCaseId(case_id);
     if (existing) return existing;
 
-    const ticketCode = `TKT-${new Date().getFullYear()}-${String(store.serviceTickets.length + 1).padStart(4, '0')}`;
+    const ticketCode = `TKT-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`;
     const newTicket = {
       id: `tkt-${Date.now()}`,
       ticket_code: ticketCode,
@@ -72,13 +28,12 @@ export const TicketsService = {
       created_at: new Date().toISOString()
     };
 
-    store.serviceTickets.push(newTicket);
-    return newTicket;
+    return Repository.createServiceTicket(newTicket);
   },
 
   // 3. Set coverage decision (Support proposes, Admin approves goodwill)
-  setCoverageDecision(ticketCode, { decision, reason, approver_role = 'Support' }) {
-    const ticket = store.serviceTickets.find(t => t.ticket_code === ticketCode || t.id === ticketCode);
+  async setCoverageDecision(ticketCode, { decision, reason, approver_role = 'Support' }) {
+    const ticket = await Repository.getServiceTicketByCodeOrId(ticketCode);
     if (!ticket) {
       const err = new Error(`Service ticket ${ticketCode} not found`);
       err.code = 'NOT_FOUND';
@@ -94,14 +49,12 @@ export const TicketsService = {
       throw err;
     }
 
-    ticket.coverage_decision = decision; // COVERED_WARRANTY, NOT_COVERED_PAID, GOODWILL
-
-    return ticket;
+    return Repository.updateCoverageDecision(ticket.ticket_code, decision);
   },
 
   // 4. Add service charge (CRITICAL: Gated by coverage decision §7.6, §20.1 T-18)
-  addCharge(ticketCode, { type, description, amount_paise }) {
-    const ticket = store.serviceTickets.find(t => t.ticket_code === ticketCode || t.id === ticketCode);
+  async addCharge(ticketCode, { type, description, amount_paise }) {
+    const ticket = await Repository.getServiceTicketByCodeOrId(ticketCode);
     if (!ticket) {
       const err = new Error(`Service ticket ${ticketCode} not found`);
       err.code = 'NOT_FOUND';
@@ -133,12 +86,11 @@ export const TicketsService = {
       created_at: new Date().toISOString()
     };
 
-    store.serviceCharges.push(charge);
-    return charge;
+    return Repository.createServiceCharge(charge);
   },
 
   // 5. Get charges for ticket
-  getCharges(ticketCode) {
-    return store.serviceCharges.filter(sc => sc.ticket_code === ticketCode);
+  async getCharges(ticketCode) {
+    return Repository.getServiceCharges(ticketCode);
   }
 };

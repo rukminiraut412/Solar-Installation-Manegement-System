@@ -8,6 +8,9 @@ import { FinanceService } from './finance.service.js';
 import { DashboardsService } from './dashboards.service.js';
 import { AIService } from './ai.service.js';
 import { evaluateSafety, FIXED_SAFETY_NOTICE } from './safety.js';
+import { Repository } from './repository.js';
+import { WarrantyAdapter } from './warranty.adapter.js';
+import routes from './routes.js';
 import { ENV } from '../../config/env.js';
 
 test('1. Safety Interceptor: Pre-Model Emergency Hazard Detection (§9.3, AC-8)', () => {
@@ -27,8 +30,8 @@ test('1. Safety Interceptor: Pre-Model Emergency Hazard Detection (§9.3, AC-8)'
   assert.equal(safeScan.recommendedPriority, null);
 });
 
-test('2. Case Creation & Deterministic P1 Safety Pinning (§9.3, T-36)', () => {
-  const newCase = CasesService.createCase({
+test('2. Case Creation & Deterministic P1 Safety Pinning (§9.3, T-36)', async () => {
+  const newCase = await CasesService.createCase({
     customer_id: 'cus-test-01',
     customer_name: 'Test Customer',
     description: 'There is a strong burning smell and small fire sparks near the inverter.',
@@ -40,20 +43,20 @@ test('2. Case Creation & Deterministic P1 Safety Pinning (§9.3, T-36)', () => {
   assert.equal(newCase.status, 'Escalated to Support');
 
   // Verify emergency message was added to case
-  const detail = CasesService.getCaseDetail(newCase.id, 'Admin');
+  const detail = await CasesService.getCaseDetail(newCase.id, 'Admin');
   assert.ok(detail.messages.some(m => m.body === FIXED_SAFETY_NOTICE));
 });
 
-test('3. Pre-Billing Warranty Guard: Blocking Charges While Coverage is PENDING (§7.6, T-18)', () => {
-  const ticket = TicketsService.createTicket({
+test('3. Pre-Billing Warranty Guard: Blocking Charges While Coverage is PENDING (§7.6, T-18)', async () => {
+  const ticket = await TicketsService.createTicket({
     case_id: 'case-test-warranty-01',
     serial_item_id: 'INV-SN-887123'
   });
   assert.equal(ticket.coverage_decision, 'PENDING');
 
   // Attempt to add charge while coverage is PENDING -> MUST FAIL with 422 COVERAGE_PENDING
-  assert.throws(() => {
-    TicketsService.addCharge(ticket.ticket_code, {
+  await assert.rejects(async () => {
+    await TicketsService.addCharge(ticket.ticket_code, {
       description: 'Emergency isolation inspection',
       amount_paise: 250000
     });
@@ -64,7 +67,7 @@ test('3. Pre-Billing Warranty Guard: Blocking Charges While Coverage is PENDING 
   });
 
   // Now set coverage to NOT_COVERED_PAID and verify adding charge succeeds
-  const updatedTicket = TicketsService.setCoverageDecision(ticket.ticket_code, {
+  const updatedTicket = await TicketsService.setCoverageDecision(ticket.ticket_code, {
     decision: 'NOT_COVERED_PAID',
     reason: 'Damage caused by external grid surge exceeding surge protection',
     approver_role: 'Admin'
@@ -72,17 +75,17 @@ test('3. Pre-Billing Warranty Guard: Blocking Charges While Coverage is PENDING 
 
   assert.equal(updatedTicket.coverage_decision, 'NOT_COVERED_PAID');
 
-  const chargedItem = TicketsService.addCharge(ticket.ticket_code, {
+  const chargedItem = await TicketsService.addCharge(ticket.ticket_code, {
     description: 'Field diagnostic fee',
     amount_paise: 250000
   });
 
-  assert.equal(chargedItem.amount_paise, 250000);
+  assert.equal(Number(chargedItem.amount_paise), 250000);
 });
 
-test('4. 7-Stage Support Chain: Strict Customer Confirmation Guard Before Closure (§9.2, §9.5, AC-6)', () => {
+test('4. 7-Stage Support Chain: Strict Customer Confirmation Guard Before Closure (§9.2, §9.5, AC-6)', async () => {
   // 1. Customer reports issue
-  const testCase = CasesService.createCase({
+  const testCase = await CasesService.createCase({
     customer_id: 'cus-chain-01',
     customer_name: 'Chain Demo Client',
     description: 'Inverter error code E-04 displayed on LCD panel.',
@@ -90,14 +93,14 @@ test('4. 7-Stage Support Chain: Strict Customer Confirmation Guard Before Closur
   });
 
   // 2. Support confirms classification
-  CasesService.updateClassification(testCase.id, {
+  await CasesService.updateClassification(testCase.id, {
     category: 'Major',
     priority: 'P2',
     reason: 'Inverter grid synchronisation error verified'
   });
 
   // 3. Admin assigns technician
-  CasesService.adminDecision(testCase.id, {
+  await CasesService.adminDecision(testCase.id, {
     decision: 'Approve',
     assigned_technician_id: 'tech-001',
     scheduled_visit_at: new Date().toISOString(),
@@ -105,21 +108,21 @@ test('4. 7-Stage Support Chain: Strict Customer Confirmation Guard Before Closur
   });
 
   // 4. Technician completes field work (Never closes case alone per §9.2)
-  CasesService.technicianComplete(testCase.id, {
+  await CasesService.technicianComplete(testCase.id, {
     technician_notes: 'Loose AC breaker wire retorqued.',
     technician_resolved: true,
     parts_used: ['15A Fuse']
   });
 
   // 5. Support reviews evidence & requests customer confirmation
-  CasesService.supportReview(testCase.id, {
+  await CasesService.supportReview(testCase.id, {
     accepted: true,
     notes: 'Field evidence verified. Ready for customer sign-off.'
   });
 
   // 6. Attempt to close case BEFORE customer confirmation -> MUST FAIL
-  assert.throws(() => {
-    CasesService.closeCase(testCase.id, {
+  await assert.rejects(async () => {
+    await CasesService.closeCase(testCase.id, {
       closure_notes: 'Staff attempting early closure without customer approval',
       actorRole: 'Support'
     });
@@ -131,12 +134,12 @@ test('4. 7-Stage Support Chain: Strict Customer Confirmation Guard Before Closur
   });
 
   // 7. Customer confirms resolution
-  CasesService.customerConfirmation(testCase.id, {
+  await CasesService.customerConfirmation(testCase.id, {
     confirmed: true
   });
 
   // 8. Now closure succeeds
-  const closedCase = CasesService.closeCase(testCase.id, {
+  const closedCase = await CasesService.closeCase(testCase.id, {
     closure_notes: 'Customer verified power generation is normal. Case resolved.',
     actorRole: 'Support'
   });
@@ -144,8 +147,8 @@ test('4. 7-Stage Support Chain: Strict Customer Confirmation Guard Before Closur
   assert.equal(closedCase.status, 'Closed');
 });
 
-test('5. Customer Dispute Reopens Case & Increments Repeat Count (§9.5, T-45)', () => {
-  const disputeCase = CasesService.createCase({
+test('5. Customer Dispute Reopens Case & Increments Repeat Count (§9.5, T-45)', async () => {
+  const disputeCase = await CasesService.createCase({
     customer_id: 'cus-disp-01',
     customer_name: 'Disputing Customer',
     description: 'Generation drop inquiry on rooftop system.',
@@ -156,7 +159,7 @@ test('5. Customer Dispute Reopens Case & Increments Repeat Count (§9.5, T-45)',
   assert.equal(disputeCase.priority, 'P3');
 
   // Customer disputes
-  const disputed = CasesService.customerConfirmation(disputeCase.id, {
+  const disputed = await CasesService.customerConfirmation(disputeCase.id, {
     confirmed: false,
     dispute_notes: 'Issue still persists! Inverter shut down again after 20 minutes.'
   });
@@ -167,8 +170,8 @@ test('5. Customer Dispute Reopens Case & Increments Repeat Count (§9.5, T-45)',
   assert.equal(disputed.priority, 'P2'); // Priority raised
 });
 
-test('6. Internal Notes Visibility Scoping: Customer Never Sees Internal Notes (§9.6, T-47)', () => {
-  const c = CasesService.createCase({
+test('6. Internal Notes Visibility Scoping: Customer Never Sees Internal Notes (§9.6, T-47)', async () => {
+  const c = await CasesService.createCase({
     customer_id: 'cus-private-01',
     customer_name: 'Privacy Test Customer',
     description: 'General system status query',
@@ -176,7 +179,7 @@ test('6. Internal Notes Visibility Scoping: Customer Never Sees Internal Notes (
   });
 
   // Add customer visible message
-  CasesService.addMessage(c.id, {
+  await CasesService.addMessage(c.id, {
     author_id: 'usr-support',
     author_name: 'Support Team',
     author_type: 'SUPPORT',
@@ -185,7 +188,7 @@ test('6. Internal Notes Visibility Scoping: Customer Never Sees Internal Notes (
   });
 
   // Add internal team note
-  CasesService.addMessage(c.id, {
+  await CasesService.addMessage(c.id, {
     author_id: 'usr-admin',
     author_name: 'Finance Admin',
     author_type: 'ADMIN',
@@ -194,17 +197,17 @@ test('6. Internal Notes Visibility Scoping: Customer Never Sees Internal Notes (
   });
 
   // Query as Customer
-  const customerView = CasesService.getCaseDetail(c.id, 'Customer');
+  const customerView = await CasesService.getCaseDetail(c.id, 'Customer');
   assert.ok(customerView.messages.every(m => m.visibility !== 'INTERNAL'), 'Customer must never see internal team notes');
 
   // Query as Admin
-  const adminView = CasesService.getCaseDetail(c.id, 'Admin');
+  const adminView = await CasesService.getCaseDetail(c.id, 'Admin');
   assert.ok(adminView.messages.some(m => m.visibility === 'INTERNAL'), 'Admin must see internal notes');
 });
 
-test('7. Razorpay Order Creation & HMAC-SHA256 Signature Verification (§17.1, §17.3, T-28)', () => {
+test('7. Razorpay Order Creation & HMAC-SHA256 Signature Verification (§17.1, §17.3, T-28)', async () => {
   const idempotencyKey = 'idem-test-key-' + Date.now();
-  const orderRes = PaymentsService.createPaymentRequest({
+  const orderRes = await PaymentsService.createPaymentRequest({
     order_id: 'ord-101',
     purpose: 'ADVANCE',
     idempotency_key: idempotencyKey
@@ -212,10 +215,10 @@ test('7. Razorpay Order Creation & HMAC-SHA256 Signature Verification (§17.1, �
 
   assert.equal(orderRes.isDuplicate, false);
   assert.ok(orderRes.paymentRequest.razorpay_order_id.startsWith('order_test_'));
-  assert.equal(orderRes.paymentRequest.amount_paise, 6000000); // 20% of 300,000 INR
+  assert.equal(Number(orderRes.paymentRequest.amount_paise), 6000000); // 20% of 300,000 INR
 
   // Idempotency: Repeating with same key returns duplicate
-  const repeatRes = PaymentsService.createPaymentRequest({
+  const repeatRes = await PaymentsService.createPaymentRequest({
     order_id: 'ord-101',
     purpose: 'ADVANCE',
     idempotency_key: idempotencyKey
@@ -231,7 +234,7 @@ test('7. Razorpay Order Creation & HMAC-SHA256 Signature Verification (§17.1, �
     .digest('hex');
 
   // Verify valid signature
-  const verified = PaymentsService.verifyCallbackSignature({
+  const verified = await PaymentsService.verifyCallbackSignature({
     payment_request_id: orderRes.paymentRequest.id,
     razorpay_order_id: orderRes.paymentRequest.razorpay_order_id,
     razorpay_payment_id: testPaymentId,
@@ -240,11 +243,11 @@ test('7. Razorpay Order Creation & HMAC-SHA256 Signature Verification (§17.1, �
 
   assert.equal(verified.success, true);
   assert.equal(verified.status, 'VERIFIED');
-  assert.equal(verified.payment.amount_paise, 6000000);
+  assert.equal(Number(verified.payment.amount_paise), 6000000);
 
   // Verify invalid signature is REJECTED
-  assert.throws(() => {
-    PaymentsService.verifyCallbackSignature({
+  await assert.rejects(async () => {
+    await PaymentsService.verifyCallbackSignature({
       payment_request_id: orderRes.paymentRequest.id,
       razorpay_order_id: orderRes.paymentRequest.razorpay_order_id,
       razorpay_payment_id: testPaymentId,
@@ -257,7 +260,7 @@ test('7. Razorpay Order Creation & HMAC-SHA256 Signature Verification (§17.1, �
   });
 });
 
-test('8. Webhook Idempotency: Duplicate Delivery Protection (§17.4, T-29, T-30)', () => {
+test('8. Webhook Idempotency: Duplicate Delivery Protection (§17.4, T-29, T-30)', async () => {
   const eventPayload = {
     id: 'evt_wh_unique_' + Date.now(),
     event: 'payment.captured',
@@ -281,7 +284,7 @@ test('8. Webhook Idempotency: Duplicate Delivery Protection (§17.4, T-29, T-30)
     .digest('hex');
 
   // First webhook delivery
-  const firstResult = PaymentsService.processWebhook({
+  const firstResult = await PaymentsService.processWebhook({
     rawBody,
     signatureHeader: webhookSignature,
     eventPayload
@@ -289,7 +292,7 @@ test('8. Webhook Idempotency: Duplicate Delivery Protection (§17.4, T-29, T-30)
   assert.equal(firstResult.status, 'PROCESSED');
 
   // Duplicate webhook delivery with identical event id
-  const duplicateResult = PaymentsService.processWebhook({
+  const duplicateResult = await PaymentsService.processWebhook({
     rawBody,
     signatureHeader: webhookSignature,
     eventPayload
@@ -298,8 +301,8 @@ test('8. Webhook Idempotency: Duplicate Delivery Protection (§17.4, T-29, T-30)
   assert.ok(duplicateResult.message.includes('idempotent no-op'));
 });
 
-test('9. Authoritative Reconciliation Widget: Discrepancy Must Strictly Equal Zero (§13.1, §20.1 T-24)', () => {
-  const reconciliation = DashboardsService.getPaymentReconciliation();
+test('9. Authoritative Reconciliation Widget: Discrepancy Must Strictly Equal Zero (§13.1, §20.1 T-24)', async () => {
+  const reconciliation = await DashboardsService.getPaymentReconciliation();
   
   assert.equal(typeof reconciliation.dashboard_reported_paise, 'number');
   assert.equal(typeof reconciliation.sum_verified_ledger_paise, 'number');
@@ -308,8 +311,8 @@ test('9. Authoritative Reconciliation Widget: Discrepancy Must Strictly Equal Ze
   assert.equal(reconciliation.status, 'RECONCILED_EXACT');
 });
 
-test('10. Project Profitability Math: Revenue - (Material + Labor + Direct + Service) (§7.7, §20.2 AC-12)', () => {
-  const pl = FinanceService.getProjectProfitability('prj-101');
+test('10. Project Profitability Math: Revenue - (Material + Labor + Direct + Service) (§7.7, §20.2 AC-12)', async () => {
+  const pl = await FinanceService.getProjectProfitability('prj-101');
 
   const expectedTotalCosts = 
     pl.costs.material.amount_paise + 
@@ -330,15 +333,15 @@ test('10. Project Profitability Math: Revenue - (Material + Labor + Direct + Ser
   assert.equal(pl.costs.service_warranty.type, 'ACTUAL');
 });
 
-test('11. AI Assistance: Grounded Summaries & Dual-Panel Plain Language Warranty (§8, §16.10, T-35, T-38)', () => {
+test('11. AI Assistance: Grounded Summaries & Dual-Panel Plain Language Warranty (§8, §16.10, T-35, T-38)', async () => {
   // Grounded Summary
-  const summary = AIService.summarizeEntity({ entityType: 'case', entityId: 'case-001', callerRole: 'Admin' });
+  const summary = await AIService.summarizeEntity({ entityType: 'case', entityId: 'case-001', callerRole: 'Admin' });
   assert.ok(summary.content.includes('Inverter') || summary.content.includes('Customer'));
   assert.ok(summary.sources.length > 0);
   assert.equal(summary.label, 'Demo AI output (rule-based template)');
 
   // Dual-Panel Warranty
-  const warranty = AIService.explainWarranty({ serialNumber: 'INV-SN-887123', callerRole: 'Customer' });
+  const warranty = await AIService.explainWarranty({ serialNumber: 'INV-SN-887123', callerRole: 'Customer' });
   assert.ok(warranty.system_result);
   assert.equal(warranty.system_result.status, 'WITHIN_PERIOD');
   assert.ok(warranty.explanation);
@@ -351,13 +354,47 @@ test('11. AI Assistance: Grounded Summaries & Dual-Panel Plain Language Warranty
   assert.ok(gaps.missing.some(item => item.field === 'roof_info'));
 
   // Safe Support Triage
-  const triage = AIService.triageIssue({ description: 'My inverter is making a clicking sound' });
+  const triage = await AIService.triageIssue({ description: 'My inverter is making a clicking sound' });
   assert.equal(triage.safety_flag, false);
   assert.ok(triage.sources.length > 0);
 
   // Hazardous Triage Interceptor
-  const hazardTriage = AIService.triageIssue({ description: 'I see smoke and flame coming from battery' });
+  const hazardTriage = await AIService.triageIssue({ description: 'I see smoke and flame coming from battery' });
   assert.equal(hazardTriage.safety_flag, true);
   assert.equal(hazardTriage.priority, 'P1');
   assert.equal(hazardTriage.bypass_ai, true);
+});
+
+test('12. Database Repository Layer & Connectivity Probe (§7.6, §103_support_finance.sql)', async () => {
+  const probe = await Repository.checkDatabaseHealth();
+  assert.equal(typeof probe.isLive, 'boolean');
+
+  // Verify Repository methods execute without throwing
+  const cases = await Repository.listCases({ role: 'Admin' });
+  assert.ok(Array.isArray(cases));
+
+  const invoices = await Repository.listInvoices();
+  assert.ok(Array.isArray(invoices));
+  assert.ok(invoices.every(inv => typeof inv.total_paise === 'number'));
+
+  const payments = await Repository.listVerifiedPayments();
+  assert.ok(Array.isArray(payments));
+});
+
+test('13. Operations Warranty Adapter Contract Interface (§7.5, §20.1 T-19)', async () => {
+  const res = await WarrantyAdapter.checkEligibility('INV-SN-887123');
+  assert.equal(res.status, 'WITHIN_PERIOD');
+  assert.ok(res.remainingDays > 0);
+  assert.ok(res.record);
+  assert.equal(res.record.duration_months, 24);
+
+  // Invalid serial lookup returns NO_RECORD
+  const missingRes = await WarrantyAdapter.checkEligibility('NON_EXISTENT_SERIAL_99999');
+  assert.equal(missingRes.status, 'NO_RECORD');
+});
+
+test('14. Route Harmonization: Verify Router Exports All Bound Endpoints', () => {
+  assert.ok(routes);
+  assert.equal(typeof routes, 'function'); // Express Router function
+  assert.ok(routes.stack.length >= 25, 'Harmonized router must export all bound endpoints');
 });
