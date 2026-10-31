@@ -4,8 +4,8 @@
 **Module Scope:** Products, Inventory, Double-Entry Stock Ledger, Reservations, Dispatch, Serial Item Registry, Technician Crew Scheduling, Rooftop Installation, Electrical Safety Testing, Photo Proof, Handover Signature, Warranty Activation  
 **API Mount Prefix:** `/api/v1/operations/`  
 **Database Migration Target:** `server/src/db/migrations/102_operations.sql`  
-**Cross-Module Alignment:** Member 1 (Platform Foundation), Member 2 (Sales & Projects), Member 4 (Support & Finance)  
-**Version:** 1.1.0 (Phase 0 Contract Review & Correction)  
+**Cross-Module Alignment:** Member 1 (Platform Foundation), Member 2 (Customer & Sales), Member 4 (Support & Finance)  
+**Version:** 1.2.0 (Phase 0 Final Integration Review & Alignment)  
 **Status:** Approved for Implementation
 
 ---
@@ -99,17 +99,61 @@ $$\mathbf{Q_{available} = Q_{on\_hand} - Q_{reserved}}$$
 
 ## 4. Stock Reservation, Shortage Handling & Warehouse Dispatch Protocol
 
-### 4.1 Advance Payment Gate for Dispatch (`[NC-01]`)
-- **BR-PAY-001 Enforcement:** No warehouse packing order or dispatch order may be scheduled until Member 4 confirms that advance payment has been received (`orders.payment_status IN ('ADVANCE_PAID', 'FULLY_PAID')`).
-- **Policy Rule (`[NC-01]`):** `SOLAR_MANAGEMENT_SYSTEM.md` states: *"A customer usually pays an advance, or the full amount, before work starts."* The exact required threshold (percentage or fixed advance amount) is configurable via `system_settings.advance_dispatch_threshold_pct` (with a labeled demo default of 25%), or waived via explicit Admin exception override.
-- If an order is in `PENDING_ADVANCE`, warehouse operators can view reserved parts, but the "Create Dispatch Manifest" button is disabled in the UI and rejected with `403 Forbidden` (`ADVANCE_PAYMENT_REQUIRED`) at the API layer.
+### 4.1 Advance Payment Gate & Dispatch Eligibility Contract (`[NC-01]`, `[NC-02]`)
+In accordance with cross-module coordination with Member 2 (`docs/contracts/customer-sales.md`) and Member 4 (`docs/contracts/support-finance.md`):
 
-### 4.2 Automated BOM Stock Reservation Flow
-1. Customer digitally accepts quotation (Triggered by Member 2 via `POST /api/v1/operations/projects/:id/reserve-stock`).
-2. The Operations engine loads the complete project Bill of Materials (`project_bom_items`).
-3. For each BOM line item, the engine checks `inventory_items.available_quantity`:
-   - **Case A (Sufficient Stock):** Executes atomic transaction locking stock rows (`SELECT FOR UPDATE`), increments `reserved_quantity`, creates `stock_reservations` records, and logs ledger `RESERVATION`.
-   - **Case B (Shortage Detected):** If $Q_{required} > Q_{available}$ for any single item, the system flags the project as `SHORTAGE_FLAGGED`, records the exact deficit amount, and generates an automated procurement task for warehouse management.
+1. **Authoritative Payment Status Source:**
+   - Member 2's `orders` table defines the order status column: `orders.status` (`order_status_enum`: `'PENDING_ADVANCE'`, `'ADVANCE_PAID'`, `'PROCESSING'`, `'DISPATCHED'`, `'COMPLETED'`, `'CANCELLED'`).
+   - Member 2's `orders` table also stores the commercial terms: `advance_required_percent` (NUMERIC(4,2), configurable `[NC-01]`) and `advance_required_amount` (NUMERIC(10,2)).
+   - Member 4's financial engine records payments and updates `orders.status = 'ADVANCE_PAID'` upon successful HMAC signature verification of advance payment.
+   - **Note:** The field `payment_status` is **not** present in `orders`. Operations checks `orders.status` directly.
+
+2. **Dispatch Eligibility Rule:**
+   A warehouse dispatch manifest can be created and confirmed if and only if **any** of the following conditions are met:
+   - **Condition A (Standard Payment):** `orders.status IN ('ADVANCE_PAID', 'PROCESSING', 'DISPATCHED')`.
+   - **Condition B (Direct Financial Verification):** Member 4's `payments` table shows captured payments (`payments.status = 'CAPTURED'`) where $\sum \text{amount} \ge \text{orders.advance\_required\_amount}$.
+   - **Condition C (Admin Exception Override):** An Admin/Owner user explicitly grants a dispatch waiver flag (`advance_payment_override = true`) with a mandatory audit reason.
+   - **Condition D (Gate Disabled):** The system setting `enforce_advance_dispatch_gate` is configured to `false` (`[NC-02]`).
+
+3. **Configurable Advance Threshold (`[NC-01]`):**
+   - `SOLAR_MANAGEMENT_SYSTEM.md` states: *"A customer usually pays an advance, or the full amount, before work starts."*
+   - There is **no hardcoded mandatory 25% advance requirement**.
+   - The required advance percentage is stored per order in `orders.advance_required_percent` (defaulting to configurable system setting `[DEMO: 25.0%]`, with full-payment 100% options supported).
+
+4. **Enforcement Behavior:**
+   - If an order is in `PENDING_ADVANCE` and no override exists, warehouse operators can view reserved stock, but the "Create Dispatch Manifest" button is disabled and `POST /api/v1/operations/dispatch/create` rejects with `403 Forbidden` (`ADVANCE_PAYMENT_REQUIRED`).
+
+### 4.2 Project BOM Integration & Handover Flow
+In accordance with Member 2's contract (`docs/contracts/customer-sales.md` §3.5 & §6.2):
+
+1. **How an Accepted Quotation Becomes a Project BOM:**
+   - **Stage 1 (Commercial Derivation):** Member 2's sales engine derives standard components from `package_components` (plus surveyed cable extensions) and records them as `quotation_items` for the quotation (`category`, `name`, `sku`, `quantity`, `unit`, `unit_price`, `total_price`).
+   - **Stage 2 (Customer Acceptance):** The customer accepts the quote online (`quotation_acceptances`), which creates an `orders` record.
+   - **Stage 3 (Handover Dispatch):** Member 2 triggers the Operations Handover via:
+     - Push: `POST /api/v1/operations/projects/handover`
+     - Pull: `GET /api/v1/customer-sales/handover/:orderId`
+   - **Stage 4 (Project BOM Creation & Ownership):**
+     - Member 2 owns the commercial quote items (`quotation_items`).
+     - **Member 3 (Operations) creates and owns the physical project BOM table: `project_bom_items`** (defined in `102_operations.sql`).
+     - Upon receiving the handover payload, Operations inserts lines into `project_bom_items`, resolving `products.id` by matching `products.sku = item.sku`.
+
+2. **Fields Operations Needs and Stores in `project_bom_items`:**
+   - `id` (UUID v4): Unique allocation line ID.
+   - `project_id` (UUID): Project reference.
+   - `order_id` (UUID): Commercial order reference.
+   - `product_id` (UUID): Internal catalog reference (`products.id`).
+   - `sku` (VARCHAR(100)): Product SKU code.
+   - `category` (VARCHAR(50)): Category taxonomy.
+   - `name` (VARCHAR(255)): Component description.
+   - `quantity_required` (NUMERIC(6,2)): Quantity required by the BOM.
+   - `quantity_reserved` (NUMERIC(6,2)): Quantity currently locked in warehouse.
+   - `quantity_dispatched` (NUMERIC(6,2)): Quantity physically loaded on truck.
+   - `is_serialized` (BOOLEAN): Requires individual serial barcode scanning.
+
+3. **Automated Stock Reservation:**
+   - For each line in `project_bom_items`, Operations checks `inventory_items.available_quantity`:
+     - **Sufficient Stock:** Locks row (`SELECT FOR UPDATE`), increments `reserved_quantity`, creates `stock_reservations`, and logs ledger `RESERVATION`.
+     - **Shortage Detected:** Flags project status as `SHORTAGE_FLAGGED`, logs deficit amount, and alerts warehouse management.
 
 ### 4.3 Dispatch Manifest Initialization
 - Warehouse manager opens confirmed project in `Warehouse Dashboard`.
@@ -141,7 +185,7 @@ $$\mathbf{Q_{available} = Q_{on\_hand} - Q_{reserved}}$$
 To ensure 100% interoperability with Member 4 (Support & Finance) without silent naming collisions:
 - The authoritative PostgreSQL table name is **`serial_items`** (with primary key `id UUID`, unique column `serial_number`, foreign key `product_id`).
 - Foreign keys across all modules reference `serial_item_id REFERENCES serial_items(id)`.
-- For backwards-compatibility and semantic reporting, a database view `serial_registry` is defined as `SELECT * FROM serial_items`.
+- **SQL Compatibility Design:** A backwards-compatibility view `CREATE OR REPLACE VIEW serial_registry AS SELECT * FROM serial_items;` is included as a **proposed schema design** in migration `102_operations.sql`. *(Note: This view is a planned migration DDL artifact and is not claimed as executed during Phase 0).*
 - Global uniqueness constraint: `UNIQUE (serial_number)`. Re-registering an existing serial number on inbound GRN fails with `409 Conflict`.
 
 ### 5.2 Serial Number Lifecycle States
@@ -150,8 +194,8 @@ stateDiagram-v2
     [*] --> IN_WAREHOUSE: Inbound Vendor GRN
     IN_WAREHOUSE --> RESERVED: Order BOM Allocation
     RESERVED --> IN_TRANSIT: Scanned at Dispatch
-    IN_TRANSIT --> INSTALLED: Handover Signed on Roof
-    INSTALLED --> ACTIVE_WARRANTY: Auto-Activated on Handover
+    IN_TRANSIT --> INSTALLED: Delivered / Handover Signed
+    INSTALLED --> ACTIVE_WARRANTY: Auto-Activated on Delivery/Handover
     ACTIVE_WARRANTY --> REPLACED_UNDER_WARRANTY: Defect Claim / RMA
     ACTIVE_WARRANTY --> EXPIRED_WARRANTY: Expiration Date Reached
     IN_WAREHOUSE --> DAMAGED_QUARANTINE: In-Warehouse Defect/Damage
@@ -286,13 +330,20 @@ Field technicians execute jobs using a dedicated mobile web interface:
 ## 10. Warranty Lifecycle, Automated Activation, Expiry & Claims Verification
 
 ### 10.1 Automated Warranty Clock Activation (`[NC-02]`, `[NC-03]`)
-- **BR-WRN-001 Enforcement:** `SOLAR_MANAGEMENT_SYSTEM.md` mandates: *"The moment a delivery is done, the warranty clock should start by itself for every serial number: for example 2 years for an inverter or battery, and 20 years for solar panels. No one should have to type dates into a register."*
-- **Warranty Start Event (`[NC-02]`):** Configurable between `DELIVERY` and `HANDOVER` (demo default: `HANDOVER`, when commissioning is signed).
+- **BR-WRN-001 Enforcement:** `SOLAR_MANAGEMENT_SYSTEM.md` (§3) explicitly mandates:  
+  > *"The moment a delivery is done, the warranty clock should start by itself for every serial number: for example 2 years for an inverter or battery, and 20 years for solar panels. No one should have to type dates into a register."*
+
+- **Confirmed Specification Default vs Configurable Alternative (`[NC-02]`):**
+  - **Confirmed Specification Default:** **`DELIVERY`** (The clock starts automatically when physical delivery is completed and serials arrive on site).
+  - **Configurable Alternative:** **`HANDOVER`** (Clock starts when customer digital handover sign-off is completed).
+  - Selected via `system_settings.warranty_start_event = 'DELIVERY' | 'HANDOVER'` (Default: `DELIVERY`).
+
 - **Warranty Durations (`[NC-03]`):** Example values in specification are configured as demo defaults:
   - **Solar PV Modules:** **20 Years (240 Months)** performance warranty.
   - **Inverter:** **2 Years (24 Months)** manufacturer replacement warranty.
   - **Battery Storage:** **2 Years (24 Months)** replacement/cycle warranty.
-  - Duration is stored per product/policy and is fully configurable.
+  - Durations are stored per product/policy and are fully configurable.
+
 - **No Manual Typing:** Manual entry of warranty dates into books or registers is strictly prohibited. Expiry dates are calculated via database interval arithmetic:
   $$\text{end\_date} = \text{start\_date} + \text{duration\_months}$$
 
@@ -396,9 +447,10 @@ To ensure complete consistency with Member 4's `warranty.adapter.js`, Operations
 | `GET` | `/api/v1/operations/inventory/shortages` | Admin/Owner, Warehouse, Sales | Active shortage alerts for accepted customer orders |
 | `POST` | `/api/v1/operations/inventory/corrections` | Admin/Owner, Warehouse | Submit physical count variance adjustment (Admin approval gated `[NC-23]`) |
 
-### 11.3 Project Stock Reservation & Shortage Alerts
+### 11.3 Project Handover, Stock Reservation & Shortage Alerts
 | Method | Endpoint | RBAC Access | Description |
 |---|---|---|---|
+| `POST` | `/api/v1/operations/projects/handover` | Admin/Owner, Sales, System | Ingest order and frozen BOM from Member 2; creates `project_bom_items` |
 | `POST` | `/api/v1/operations/projects/:id/reserve-stock` | Admin/Owner, Warehouse, System | Lock BOM components for an accepted project; flags shortage if insufficient |
 | `DELETE` | `/api/v1/operations/projects/:id/reserve-stock` | Admin/Owner, Warehouse | Release reserved stock back to available pool upon order cancellation |
 | `GET` | `/api/v1/operations/projects/:id/reservation-status` | Admin/Owner, Warehouse, Sales | View reservation fulfillment status and assigned serial numbers |
@@ -413,7 +465,7 @@ To ensure complete consistency with Member 4's `warranty.adapter.js`, Operations
 ### 11.5 Dispatch & Delivery Management
 | Method | Endpoint | RBAC Access | Description |
 |---|---|---|---|
-| `POST` | `/api/v1/operations/dispatch/create` | Admin/Owner, Warehouse | Initialize dispatch packing manifest (Advance payment prerequisite enforced `[NC-01]`) |
+| `POST` | `/api/v1/operations/dispatch/create` | Admin/Owner, Warehouse | Initialize dispatch packing manifest (Advance payment check or override `[NC-01]`) |
 | `GET` | `/api/v1/operations/dispatch/:id` | Admin/Owner, Warehouse, Tech | Get dispatch details, driver info, and scanned serial checklist |
 | `POST` | `/api/v1/operations/dispatch/:id/confirm` | Admin/Owner, Warehouse | Confirm truck departure; validates 100% serial scans; moves stock to In_Transit |
 | `GET` | `/api/v1/operations/dispatch/:id/challan` | Admin/Owner, Warehouse | Download Delivery Challan PDF with serialized equipment list |
@@ -459,7 +511,70 @@ All responses strictly follow Member 1's standardized envelope:
 }
 ```
 
-### 12.2 Inbound Stock Receipt (GRN) Payload
+### 12.2 Handover Ingestion Payload (From Member 2)
+- **`POST /api/v1/operations/projects/handover`**
+```json
+{
+  "orderId": "3b1a4d22-b5e1-4a71-95fa-e22a10010001",
+  "orderNumber": "ORD-2026-0042",
+  "projectId": "7e01b230-8a1a-4d00-b2e1-01aeb33b2002",
+  "projectCode": "PRJ-2026-0042",
+  "customerId": "8f12c340-9a2b-4e11-c3f2-12aeb44c3003",
+  "customerName": "Ramesh Chandra Sharma",
+  "customerPhone": "+919876543210",
+  "siteAddress": "Flat 402, Shanti Heights, Baner Road",
+  "city": "Pune",
+  "pincode": "411045",
+  "packageType": "ON_GRID",
+  "systemCapacityKw": 3.0,
+  "bomItems": [
+    {
+      "category": "PANEL",
+      "sku": "PNL-MONO-540W",
+      "name": "540W Monocrystalline PERC Solar Panel",
+      "quantity": 6,
+      "unit": "PCS"
+    },
+    {
+      "category": "INVERTER",
+      "sku": "INV-GROW-3K-26",
+      "name": "Growatt 3.3kW On-Grid String Inverter",
+      "quantity": 1,
+      "unit": "PCS"
+    },
+    {
+      "category": "STRUCTURE",
+      "sku": "STR-RAIL-ALUM-3KW",
+      "name": "Elevated Aluminium Rail Mounting Stand Set",
+      "quantity": 2,
+      "unit": "SETS"
+    },
+    {
+      "category": "ELECTRICAL",
+      "sku": "CAB-DC-4SQMM",
+      "name": "Solar DC Cable 4 sq mm (Red/Black)",
+      "quantity": 35,
+      "unit": "METERS"
+    },
+    {
+      "category": "EARTHING",
+      "sku": "EAR-CHEM-ROD-2M",
+      "name": "Chemical Earthing Electrode with Compound",
+      "quantity": 2,
+      "unit": "SETS"
+    }
+  ],
+  "financialStatus": {
+    "totalContractValue": 215796.00,
+    "advanceRequiredPercent": 25.0,
+    "advanceRequiredAmount": 53949.00,
+    "status": "PENDING_ADVANCE"
+  },
+  "handoverTimestamp": "2026-11-01T10:00:00.000Z"
+}
+```
+
+### 12.3 Inbound Stock Receipt (GRN) Payload
 - **`POST /api/v1/operations/inventory/receipts`**
 ```json
 {
@@ -495,7 +610,7 @@ All responses strictly follow Member 1's standardized envelope:
 }
 ```
 
-### 12.3 Serial Barcode Scan Verification Payload
+### 12.4 Serial Barcode Scan Verification Payload
 - **`POST /api/v1/operations/dispatch/:id/verify-serial`**
 ```json
 {
@@ -518,7 +633,7 @@ All responses strictly follow Member 1's standardized envelope:
 }
 ```
 
-### 12.4 Generation Testing Form Payload
+### 12.5 Generation Testing Form Payload
 - **`POST /api/v1/operations/installations/:id/testing`**
 ```json
 {
@@ -531,7 +646,7 @@ All responses strictly follow Member 1's standardized envelope:
 }
 ```
 
-### 12.5 Customer Handover Sign-Off Payload
+### 12.6 Customer Handover Sign-Off Payload
 - **`POST /api/v1/operations/installations/:id/sign-handover`**
 ```json
 {
@@ -555,6 +670,7 @@ erDiagram
     products ||--o{ inventory_items : tracked_in
     products ||--o{ inventory_ledger : recorded_in
     products ||--o{ serial_items : serialized_as
+    products ||--o{ project_bom_items : allocated_in
     
     stock_receipts ||--o{ stock_receipt_items : contains
     stock_receipt_items ||--|| products : references
@@ -649,7 +765,37 @@ CREATE INDEX idx_ledger_product ON inventory_ledger(product_id);
 CREATE INDEX idx_ledger_created ON inventory_ledger(created_at);
 ```
 
-#### 3. `serial_items` & `serial_item_audit` (Agreed Naming with Member 4)
+#### 3. `project_bom_items` & `stock_reservations` (Operations-Owned Allocation)
+```sql
+CREATE TABLE IF NOT EXISTS project_bom_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL,
+    order_id UUID NOT NULL,
+    product_id UUID NOT NULL REFERENCES products(id),
+    sku VARCHAR(100) NOT NULL,
+    category VARCHAR(50) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    quantity_required NUMERIC(6,2) NOT NULL CHECK (quantity_required > 0),
+    quantity_reserved NUMERIC(6,2) NOT NULL DEFAULT 0 CHECK (quantity_reserved >= 0),
+    quantity_dispatched NUMERIC(6,2) NOT NULL DEFAULT 0 CHECK (quantity_dispatched >= 0),
+    is_serialized BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_bom_items_project ON project_bom_items(project_id);
+CREATE INDEX idx_bom_items_order ON project_bom_items(order_id);
+
+CREATE TABLE IF NOT EXISTS stock_reservations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL,
+    bom_item_id UUID NOT NULL REFERENCES project_bom_items(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id),
+    reserved_quantity NUMERIC(6,2) NOT NULL CHECK (reserved_quantity > 0),
+    status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'DISPATCHED', 'RELEASED')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### 4. `serial_items` & `serial_item_audit` (Agreed Naming with Member 4)
 ```sql
 CREATE TABLE IF NOT EXISTS serial_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -670,7 +816,7 @@ CREATE INDEX idx_serial_items_number ON serial_items(serial_number);
 CREATE INDEX idx_serial_items_status ON serial_items(status);
 CREATE INDEX idx_serial_items_project ON serial_items(project_id);
 
--- Backwards-compatibility view
+-- Proposed backwards-compatibility view design (Planned for 102_operations.sql)
 CREATE OR REPLACE VIEW serial_registry AS 
 SELECT * FROM serial_items;
 
@@ -686,7 +832,7 @@ CREATE TABLE IF NOT EXISTS serial_item_audit (
 );
 ```
 
-#### 4. `technicians`, `installation_jobs` & Testing
+#### 5. `technicians`, `installation_jobs` & Testing
 ```sql
 CREATE TABLE IF NOT EXISTS technicians (
     id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -755,7 +901,7 @@ CREATE TABLE IF NOT EXISTS installation_handover (
 );
 ```
 
-#### 5. `warranty_records` (Agreed Schema Matching Member 4's Adapter)
+#### 6. `warranty_records` (Agreed Schema Matching Member 4's Adapter)
 ```sql
 CREATE TABLE IF NOT EXISTS warranty_records (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -811,23 +957,25 @@ In strict conformance with Member 1's `sanitizeFinancialResponse` middleware:
 
 ```mermaid
 flowchart TD
-    M2[Member 2: Sales & CRM] -->|1. Accepted Quote, Project & BOM| M3[Member 3: Operations & Fulfilment]
-    M4[Member 4: Finance & Support] -->|2. Advance Payment Verified| M3
+    M2[Member 2: Customer & Sales] -->|1. Ingest Handover & Create project_bom_items| M3[Member 3: Operations & Fulfilment]
+    M4[Member 4: Finance & Support] -->|2. Advance Payment Recorded| M3
     M1[Member 1: Foundation] -->|3. Cloudinary Upload Signatures| M3
-    M3 -->|4. BOM Stock Reserved / Shortage Flag| M2
-    M3 -->|5. Truck Dispatched with Serials| M4
+    M3 -->|4. Stock Reserved & Shortage Alerts| M2
+    M3 -->|5. Truck Dispatched with Scanned Serials| M4
     M3 -->|6. Job Completed & Warranty Active| M4
     M4 -->|7. Support Ticket Checks Warranty| M3
 ```
 
-### 15.1 Inbound Dependencies from Member 2 (Sales & Customer)
-- **`orders` table:** Operations requires confirmed order record with `payment_status` (`ADVANCE_PAID` or `FULLY_PAID`) and `customer_id`.
-- **`projects` table:** Operations links reservations, dispatch notes, installation jobs, and serial items to `projects.id`.
-- **`project_bom_items` / `quotation_items`:** The authoritative source of parts to reserve and scan at dispatch (fields: `id`, `project_id`, `product_id`, `quantity`, `is_serialized`, `unit_cost`).
-- **Site Survey Measurements:** Informs cable run lengths and roof mounting bracket requirements.
+### 15.1 Inbound Dependencies from Member 2 (Customer & Sales)
+Cross-referenced directly against `docs/contracts/customer-sales.md`:
+- **`orders` table:** Operations reads `orders.id`, `orders.order_number`, `orders.status` (`order_status_enum`), `orders.advance_required_percent`, and `orders.advance_required_amount`.
+- **Handover API Contract:** Operations exposes `POST /api/v1/operations/projects/handover` and consumes Member 2's `GET /api/v1/customer-sales/handover/:orderId` to receive the frozen BOM items.
+- **BOM Ingestion:** Member 2 owns `quotation_items`; Operations receives the handover payload and creates/manages `project_bom_items` in `102_operations.sql`.
+- **Site Survey Measurements:** Informs roof mounting structure bracket types and DC cable length adjustments.
 
 ### 15.2 Inbound Dependencies from Member 4 (Finance & Support)
-- **Advance Payment Verification Gate:** Dispatch initialization checks `orders.payment_status IN ('ADVANCE_PAID', 'FULLY_PAID')` originating from Razorpay HMAC verification.
+Cross-referenced directly against `docs/contracts/support-finance.md`:
+- **Advance Payment Verification Gate:** Dispatch initialization checks `orders.status IN ('ADVANCE_PAID', 'PROCESSING', 'DISPATCHED')` or verifies `payments.status = 'CAPTURED'` with $\sum \text{amount} \ge \text{orders.advance\_required\_amount}$.
 
 ### 15.3 Outbound Deliverables to Member 4 (Finance, Support & Analytics)
 - **Direct Database Interface (Agreed Query):** Member 4's `server/src/modules/support-finance/warranty.adapter.js` directly queries:
@@ -866,20 +1014,20 @@ flowchart TD
 
 In strict compliance with architectural guidelines, unspecified decisions are explicitly marked `[NC]` and configured with labeled demo defaults:
 
-| ID | Topic | Spec Section | Architectural Contract Decision / [DEMO] Default |
-|---|---|---|---|
-| **`[NC-01]`** | Advance Payment Dispatch Threshold | §7.3, §17 | Spec says: *"A customer usually pays an advance, or the full amount, before work starts."* Threshold is configurable via `system_settings.advance_dispatch_threshold_pct` (demo default: `[DEMO: 25%]`); Admin override available. |
-| **`[NC-02]`** | Warranty Start Event | §7.5 | Spec says: *"The moment a delivery is done, the warranty clock should start by itself."* Configurable via `system_settings.warranty_start_event` (`DELIVERY` vs `HANDOVER`, demo default: `[DEMO: HANDOVER]`). |
-| **`[NC-03]`** | Product Warranty Terms | §7.5 | Spec says: *"for example 2 years for an inverter or battery, and 20 years for solar panels."* Durations are examples in spec; configurable per product (demo defaults: `[DEMO: Panels 240m, Inverter 24m, Battery 24m]`). |
-| **`[NC-04]`** | Manufacturer vs Installer Warranty | §7.5, §7.6 | Both modeled in `warranty_records` (`party = 'Manufacturer' \| 'Installer'`). Workmanship duration is configurable (demo default: `[DEMO: 12m workmanship]`). |
-| **`[NC-07]`** | Technician Payroll Basis | §7.7 | Tracked as hours worked $\times$ hourly rate, configurable per technician in `technicians.daily_rate`. Statutory filings are out-of-scope. |
-| **`[NC-12]`** | Technician Assignment Approval | §9 | Configurable whether Admin approval is required for every technician assignment (setting `require_admin_approval_for_assignment`, demo default: `[DEMO: false]`). |
-| **`[NC-17]`** | Solar Panel Serialization | §7.3 | Inverters, batteries, and charge controllers mandatory serialized. Panels serialization is configurable per product (demo default: `[DEMO: Panels serialized in seed]`). |
-| **`[NC-20]`** | Replacement Unit Warranty Term | §7.5 | Configurable whether replacement unit inherits remaining term or restarts coverage via `system_settings.replacement_warranty_rule` (demo default: `[DEMO: INHERIT]`). |
-| **`[NC-23]`** | Inventory Write-Off Threshold | §7.3 | Discrepancies $> ₹2,000$ or write-offs require Admin approval; reservations have no auto-expiry (demo default: `[DEMO: ₹2,000 threshold]`). |
-| **`[NC-29]`** | Electrical & Safety Test Thresholds | §7.4 | Spec mandates: *"test that power is being generated"* and *"finishes the earthing"*. Specific limits (Earthing $\le 5.0\ \Omega$, Grid voltage 210-250V AC, Generation $> 0\text{ kW}$) are configurable engineering limits (demo default: `[DEMO: Earthing <= 5.0 Ohms]`). |
-| **`[NC-30]`** | Mandatory Installation Photo Count | §7.4 | Spec mandates: *"upload photos of the finished roof"*. Minimum photo count and categories (4 angles) are configurable (demo default: `[DEMO: 4 mandatory angles]`). |
-| **`[NC-31]`** | Crew Size & Skill Composition | §7.4 | Rooftop crew size (2-3 technicians) and requirement of 1 `ELECTRICAL_LEAD` are configurable operational rules (demo default: `[DEMO: 2-3 technicians with 1 electrical lead]`). |
+| ID | Topic | Spec Section | Confirmed Specification Default vs Configurable Policy | Marked [DEMO] Value |
+|---|---|---|---|---|
+| **`[NC-01]`** | Advance Payment Threshold | §7.3, §17 | Spec says: *"A customer usually pays an advance, or the full amount, before work starts."* Not hardcoded. Configurable via `orders.advance_required_percent` and system setting `advance_dispatch_threshold_pct`. Admin override available. | `[DEMO: 25.0% Advance]` (supports 100% full-pay) |
+| **`[NC-02]`** | Warranty Start Event | §7.5 | **Confirmed Default:** **`DELIVERY`** (Spec explicitly says: *"The moment a delivery is done, the warranty clock should start by itself"*). **Configurable Alternative:** `HANDOVER` (selectable via `system_settings.warranty_start_event`). | `[CONFIRMED: DELIVERY]` (Alternative: `HANDOVER`) |
+| **`[NC-03]`** | Product Warranty Terms | §7.5 | Spec says: *"for example 2 years for an inverter or battery, and 20 years for solar panels."* Durations are examples in spec; configurable per product/policy. | `[DEMO: Panels 240m, Inverter 24m, Battery 24m]` |
+| **`[NC-04]`** | Manufacturer vs Installer Scope | §7.5, §7.6 | Both modeled in `warranty_records` (`party = 'Manufacturer' \| 'Installer'`). Workmanship duration is configurable. | `[DEMO: 12m workmanship]` |
+| **`[NC-07]`** | Technician Payroll Basis | §7.7 | Tracked as hours worked $\times$ hourly rate, configurable per technician in `technicians.daily_rate`. Statutory filings are out-of-scope. | `[DEMO: Hourly rate tracking]` |
+| **`[NC-12]`** | Assignment Approval Protocol | §9 | Configurable whether Admin approval is required for every technician assignment (setting `require_admin_approval_for_assignment`). | `[DEMO: false]` |
+| **`[NC-17]`** | Product Serialization Scope | §7.3 | Inverters, batteries, and charge controllers mandatory serialized. Panel serialization is configurable per product. | `[DEMO: Panels serialized in seed]` |
+| **`[NC-20]`** | Replacement Unit Warranty Term | §7.5 | Configurable whether replacement unit inherits remaining term or restarts coverage via `system_settings.replacement_warranty_rule`. | `[DEMO: INHERIT]` |
+| **`[NC-23]`** | Inventory Write-Off Threshold | §7.3 | Discrepancies $> ₹2,000$ or write-offs require Admin approval; reservations have no auto-expiry. | `[DEMO: ₹2,000 threshold]` |
+| **`[NC-29]`** | Electrical Safety Thresholds | §7.4 | Spec mandates: *"test that power is being generated"* and *"finishes the earthing"*. Specific engineering limits (Earthing $\le 5.0\ \Omega$, Grid voltage 210-250V AC, Generation $> 0\text{ kW}$) are configurable engineering limits. | `[DEMO: Earthing <= 5.0 Ohms]` |
+| **`[NC-30]`** | Mandatory Installation Photos | §7.4 | Spec mandates: *"upload photos of the finished roof"*. Minimum photo count and categories (4 angles) are configurable. | `[DEMO: 4 mandatory angles]` |
+| **`[NC-31]`** | Crew Size & Skill Composition | §7.4 | Rooftop crew size (2-3 technicians) and requirement of 1 `ELECTRICAL_LEAD` are configurable operational rules. | `[DEMO: 2-3 technicians with 1 electrical lead]` |
 
 ---
 
@@ -890,7 +1038,8 @@ In strict compliance with architectural guidelines, unspecified decisions are ex
 | 1 kW to 5 kW On-Grid & Off-Grid BOM Tracking | §2, §7.3 | Master Catalog & BOM reservation with capacity validation | **COMPLIANT** |
 | Double-entry stock ledger | §7.3 | Immutable `inventory_ledger` with 8 transaction types | **COMPLIANT** |
 | Stock reservation does not reduce on-hand | §7.3 | $Q_{available} = Q_{on\_hand} - Q_{reserved}$; on-hand reduced only at dispatch | **COMPLIANT** |
-| Advance payment prerequisite for dispatch | §7.3, §17 | Dispatch creation checks `payment_status == 'ADVANCE_PAID'` (`[NC-01]`) | **COMPLIANT** |
+| Advance payment prerequisite for dispatch | §7.3, §17 | Checks `orders.status IN ('ADVANCE_PAID', 'PROCESSING')` or override (`[NC-01]`) | **COMPLIANT** |
+| Project BOM integration & Handover | §3.5, §7.3 | Handover API consumes `quotation_items`, creates `project_bom_items` | **COMPLIANT** |
 | Mandatory barcode/QR serial scanning | §3, §7.3 | Dispatch confirmation blocked until 100% serialized items scanned | **COMPLIANT** |
 | Global serial number uniqueness | §7.3 | Database unique constraint on `serial_items.serial_number` | **COMPLIANT** |
 | 360-degree serial traceability | §3, §7.3 | `GET /api/v1/operations/serials/:serialNumber/trace` (< 2s response) | **COMPLIANT** |
@@ -900,8 +1049,9 @@ In strict compliance with architectural guidelines, unspecified decisions are ex
 | Failed tests trigger rework | §7.4 | Handover locked; job marked `REWORK_REQUIRED` | **COMPLIANT** |
 | Mandatory photo uploads | §7.4 | Cloudinary upload of finished roof photos unlocks handover (`[NC-30]`) | **COMPLIANT** |
 | Customer on-screen digital signature | §3, §7.4 | Touch canvas signature stored with timestamp & IP/GPS | **COMPLIANT** |
-| Automated warranty clock activation | §3, §7.5 | Handover triggers panel and inverter/battery activation (`[NC-02]`, `[NC-03]`) | **COMPLIANT** |
+| Automated warranty clock activation | §3, §7.5 | Delivery confirmed triggers activation (Confirmed default: `DELIVERY` `[NC-02]`) | **COMPLIANT** |
 | Standardized Warranty Endpoint | §7.6 | `GET /api/v1/operations/warranties/:serialNumber` matching Member 4 adapter | **COMPLIANT** |
 | Unified Database Naming | §7.5, §15 | `serial_items` and `warranty_records` matching Member 4 queries | **COMPLIANT** |
+| SQL Compatibility View Disclaimer | §5.1, §13 | `serial_registry` view documented as proposed DDL design (not Phase 0 claim) | **COMPLIANT** |
 | 7 Standard Product Categories | §2, §15 | 7 categories agreed between catalog and database | **COMPLIANT** |
 | Strict file & module ownership | Master | Only `docs/contracts/operations.md` modified in Phase 0 | **COMPLIANT** |
