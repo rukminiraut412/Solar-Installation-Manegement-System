@@ -19,9 +19,22 @@ export const createCustomerSchema = z.object({
   addressPincode: z.string().trim().max(10).optional().or(z.literal('')),
   electricityConsumerNumber: z.string().trim().optional().or(z.literal('')),
   sanctionedLoadKw: z.coerce.number().positive().optional(),
+  installationLocation: z.string().trim().optional().or(z.literal('')),
+  solarRequirement: z.string().trim().default('On-Grid Solar System'),
+  requiredCapacityKw: z.coerce.number().positive().default(3.0),
+  additionalNotes: z.string().trim().optional().or(z.literal('')),
 });
 
 export const updateCustomerSchema = createCustomerSchema.partial();
+
+export const assignCustomerSchema = z.object({
+  sellerId: z.string().uuid().optional().nullable().or(z.literal('')),
+  technicianId: z.string().uuid().optional().nullable().or(z.literal('')),
+  warehouseId: z.string().uuid().optional().nullable().or(z.literal('')),
+  supportId: z.string().uuid().optional().nullable().or(z.literal('')),
+  notes: z.string().trim().optional().nullable().or(z.literal('')),
+});
+
 
 export const createEnquirySchema = z.object({
   fullName: z.string().trim().min(2, 'Name must be at least 2 characters').max(255),

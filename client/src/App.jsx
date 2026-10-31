@@ -10,9 +10,9 @@ function MainApp() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-3">
-        <Sun className="h-10 w-10 text-amber-500 animate-spin-slow" />
-        <span className="text-sm font-semibold tracking-wide">Initializing SunPower Platform...</span>
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center text-slate-700 gap-3">
+        <Sun className="h-10 w-10 text-amber-500 animate-spin" />
+        <span className="text-sm font-semibold tracking-wide">Loading SunPower Solar Platform...</span>
       </div>
     );
   }
@@ -23,9 +23,12 @@ function MainApp() {
 
   return (
     <Layout>
-      {({ activeTab }) => <Dashboard activeTab={activeTab} />}
+      {({ activeTab, setActiveTab }) => (
+        <Dashboard activeTab={activeTab} onSelectTab={setActiveTab} />
+      )}
     </Layout>
   );
+
 }
 
 export default function App() {

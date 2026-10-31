@@ -79,7 +79,7 @@ export default function WarrantyLookupView({ initialSerial = 'INV-GROW-3K-26-001
             Authoritative Warranty Lookup & Claims
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Authoritative warranty verification API consumed by Support & Finance (Member 4). Normalized statuses and coverage terms.
+            Authoritative warranty verification for Customer Support and Field Operations. Normalized statuses and coverage terms.
           </p>
         </div>
 

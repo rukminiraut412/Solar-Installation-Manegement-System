@@ -57,7 +57,7 @@ export default function SerialTraceabilityDossier({ initialSerialNumber = 'INV-G
             360-Degree Serial Traceability Dossier
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Authoritative lifecycle from factory receipt -> warehouse -> dispatch manifest -> rooftop installation -> warranty.
+            Authoritative lifecycle from factory receipt &rarr; warehouse &rarr; dispatch manifest &rarr; rooftop installation &rarr; warranty.
           </p>
         </div>
 

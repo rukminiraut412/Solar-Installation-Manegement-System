@@ -26,7 +26,7 @@ export const CustomerSalesController = {
 
   async listCustomers(req, res, next) {
     try {
-      const customers = await CustomerService.listCustomers(req.query);
+      const customers = await CustomerService.listCustomers(req.query, req.user);
       return successResponse(res, customers, 'Customers retrieved successfully');
     } catch (err) {
       next(err);
@@ -35,8 +35,35 @@ export const CustomerSalesController = {
 
   async getCustomer(req, res, next) {
     try {
-      const dossier = await CustomerService.getCustomerDossier(req.params.id);
+      const dossier = await CustomerService.getCustomerDossier(req.params.id, req.user);
       return successResponse(res, dossier, 'Customer dossier retrieved successfully');
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async assignCustomer(req, res, next) {
+    try {
+      const updated = await CustomerService.assignCustomer(req.params.id, req.body, req.user?.id);
+      return successResponse(res, updated, 'Operational team assigned to customer successfully');
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async getEligibleAssignees(req, res, next) {
+    try {
+      const assignees = await CustomerService.getEligibleAssignees();
+      return successResponse(res, assignees, 'Eligible assignees retrieved successfully');
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async getCustomerPublicView(req, res, next) {
+    try {
+      const view = await CustomerService.getCustomerPublicView(req.params.id);
+      return successResponse(res, view, 'Customer view retrieved successfully');
     } catch (err) {
       next(err);
     }
@@ -59,6 +86,7 @@ export const CustomerSalesController = {
       next(err);
     }
   },
+
 
   // =========================================================================
   // 2. ENQUIRIES

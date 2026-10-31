@@ -10,7 +10,11 @@ async function request(endpoint, options = {}, role = 'Admin') {
   let token = null;
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
-      token = window.localStorage.getItem('token') || window.sessionStorage?.getItem('token');
+      token =
+        window.localStorage.getItem('accessToken') ||
+        window.localStorage.getItem('token') ||
+        window.sessionStorage?.getItem('accessToken') ||
+        window.sessionStorage?.getItem('token');
     }
   } catch {
     token = null;

@@ -169,7 +169,7 @@ async function executeDb(queryFn, fallbackFn) {
       err.code === 'ECONNREFUSED' ||
       err.message?.includes('connect ECONNREFUSED') ||
       err.message?.includes('relation "') ||
-      process.env.NODE_ENV === 'test'
+      err.message?.includes('does not exist')
     ) {
       return await fallbackFn();
     }
@@ -182,9 +182,12 @@ export const CustomerSalesRepository = {
   // 1. CUSTOMERS
   // =========================================================================
   async createCustomer(data) {
+    const uniqueSuffix = `${Date.now().toString().slice(-4)}${Math.floor(100 + Math.random() * 900)}`;
+    const customerCode = data.customer_code || `CUST-${new Date().getFullYear()}-${uniqueSuffix}`;
+
     const customer = {
       id: data.id || crypto.randomUUID(),
-      customer_code: data.customer_code || `CUST-${new Date().getFullYear()}-${String(fallbackStore.customers.length + 1).padStart(4, '0')}`,
+      customer_code: customerCode,
       full_name: data.full_name,
       email: data.email || null,
       phone: data.phone,
@@ -194,7 +197,17 @@ export const CustomerSalesRepository = {
       address_pincode: data.address_pincode || null,
       electricity_consumer_number: data.electricity_consumer_number || null,
       sanctioned_load_kw: data.sanctioned_load_kw ? Number(data.sanctioned_load_kw) : null,
+      installation_location: data.installation_location || null,
+      solar_requirement: data.solar_requirement || 'On-Grid Solar System',
+      required_capacity_kw: data.required_capacity_kw ? Number(data.required_capacity_kw) : (data.sanctioned_load_kw ? Number(data.sanctioned_load_kw) : 3.0),
+      additional_notes: data.additional_notes || null,
+      assignment_status: 'PENDING_ASSIGNMENT',
       created_by: data.created_by || null,
+      assigned_seller_id: data.created_by || null, // Auto-associate registering seller
+      assigned_technician_id: null,
+      assigned_warehouse_id: null,
+      assigned_support_id: null,
+      assigned_at: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -205,14 +218,17 @@ export const CustomerSalesRepository = {
           INSERT INTO customers (
             id, customer_code, full_name, email, phone, address_street,
             address_city, address_state, address_pincode, electricity_consumer_number,
-            sanctioned_load_kw, created_by, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            sanctioned_load_kw, installation_location, solar_requirement, required_capacity_kw,
+            additional_notes, assignment_status, created_by, assigned_seller_id, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
           RETURNING *;
         `;
         const res = await pool.query(sql, [
           customer.id, customer.customer_code, customer.full_name, customer.email, customer.phone,
           customer.address_street, customer.address_city, customer.address_state, customer.address_pincode,
-          customer.electricity_consumer_number, customer.sanctioned_load_kw, customer.created_by,
+          customer.electricity_consumer_number, customer.sanctioned_load_kw, customer.installation_location,
+          customer.solar_requirement, customer.required_capacity_kw, customer.additional_notes,
+          customer.assignment_status, customer.created_by, customer.assigned_seller_id,
           customer.created_at, customer.updated_at,
         ]);
         return res.rows[0];
@@ -227,7 +243,28 @@ export const CustomerSalesRepository = {
   async getCustomerById(id) {
     return executeDb(
       async () => {
-        const res = await pool.query('SELECT * FROM customers WHERE id = $1;', [id]);
+        const sql = `
+          SELECT 
+            c.*,
+            u_created.full_name AS creator_name,
+            u_created.email AS creator_email,
+            u_seller.full_name AS assigned_seller_name,
+            u_seller.email AS assigned_seller_email,
+            u_tech.full_name AS assigned_technician_name,
+            u_tech.email AS assigned_technician_email,
+            u_wh.full_name AS assigned_warehouse_name,
+            u_wh.email AS assigned_warehouse_email,
+            u_sup.full_name AS assigned_support_name,
+            u_sup.email AS assigned_support_email
+          FROM customers c
+          LEFT JOIN users u_created ON c.created_by = u_created.id
+          LEFT JOIN users u_seller ON c.assigned_seller_id = u_seller.id
+          LEFT JOIN users u_tech ON c.assigned_technician_id = u_tech.id
+          LEFT JOIN users u_wh ON c.assigned_warehouse_id = u_wh.id
+          LEFT JOIN users u_sup ON c.assigned_support_id = u_sup.id
+          WHERE c.id = $1;
+        `;
+        const res = await pool.query(sql, [id]);
         return res.rows[0] || null;
       },
       async () => {
@@ -257,35 +294,276 @@ export const CustomerSalesRepository = {
     );
   },
 
-  async listCustomers({ search, limit = 50, offset = 0 } = {}) {
+  async listCustomers({ search, role, userId, assignmentStatus, limit = 100, offset = 0 } = {}) {
     return executeDb(
       async () => {
-        let sql = 'SELECT * FROM customers';
+        let sql = `
+          SELECT 
+            c.*,
+            u_created.full_name AS creator_name,
+            u_created.email AS creator_email,
+            u_seller.full_name AS assigned_seller_name,
+            u_seller.email AS assigned_seller_email,
+            u_tech.full_name AS assigned_technician_name,
+            u_tech.email AS assigned_technician_email,
+            u_wh.full_name AS assigned_warehouse_name,
+            u_wh.email AS assigned_warehouse_email,
+            u_sup.full_name AS assigned_support_name,
+            u_sup.email AS assigned_support_email
+          FROM customers c
+          LEFT JOIN users u_created ON c.created_by = u_created.id
+          LEFT JOIN users u_seller ON c.assigned_seller_id = u_seller.id
+          LEFT JOIN users u_tech ON c.assigned_technician_id = u_tech.id
+          LEFT JOIN users u_wh ON c.assigned_warehouse_id = u_wh.id
+          LEFT JOIN users u_sup ON c.assigned_support_id = u_sup.id
+          WHERE 1=1
+        `;
         const params = [];
-        if (search) {
-          sql += ' WHERE full_name ILIKE $1 OR phone ILIKE $1 OR email ILIKE $1 OR customer_code ILIKE $1';
-          params.push(`%${search}%`);
+
+        // STRICT RBAC & DATA PRIVACY SCOPING (PHASE 4)
+        if (role === 'Sales' && userId) {
+          params.push(userId);
+          sql += ` AND (c.assigned_seller_id = $${params.length} OR c.created_by = $${params.length})`;
+        } else if (role === 'Technician' && userId) {
+          params.push(userId);
+          sql += ` AND (c.assigned_technician_id = $${params.length})`;
+        } else if (role === 'Warehouse' && userId) {
+          params.push(userId);
+          sql += ` AND (c.assigned_warehouse_id = $${params.length})`;
+        } else if (role === 'Support' && userId) {
+          params.push(userId);
+          sql += ` AND (c.assigned_support_id = $${params.length})`;
         }
-        sql += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
+        // Admin/Owner sees all records across the platform
+
+        if (assignmentStatus) {
+          params.push(assignmentStatus);
+          sql += ` AND c.assignment_status = $${params.length}`;
+        }
+
+        if (search) {
+          params.push(`%${search}%`);
+          sql += ` AND (c.full_name ILIKE $${params.length} OR c.phone ILIKE $${params.length} OR c.email ILIKE $${params.length} OR c.customer_code ILIKE $${params.length})`;
+        }
+
+        sql += ` ORDER BY c.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2};`;
         params.push(limit, offset);
+
         const res = await pool.query(sql, params);
         return res.rows;
       },
       async () => {
         let list = [...fallbackStore.customers];
+
+        // Scoping for in-memory fallback
+        if (role === 'Sales' && userId) {
+          list = list.filter((c) => c.assigned_seller_id === userId || c.created_by === userId);
+        } else if (role === 'Technician' && userId) {
+          list = list.filter((c) => c.assigned_technician_id === userId);
+        } else if (role === 'Warehouse' && userId) {
+          list = list.filter((c) => c.assigned_warehouse_id === userId);
+        } else if (role === 'Support' && userId) {
+          list = list.filter((c) => c.assigned_support_id === userId);
+        }
+
+        if (assignmentStatus) {
+          list = list.filter((c) => c.assignment_status === assignmentStatus);
+        }
+
         if (search) {
           const s = search.toLowerCase();
           list = list.filter(
             (c) =>
-              c.full_name.toLowerCase().includes(s) ||
-              c.phone.includes(s) ||
+              c.full_name?.toLowerCase().includes(s) ||
+              c.phone?.includes(s) ||
               (c.email && c.email.toLowerCase().includes(s)) ||
-              c.customer_code.toLowerCase().includes(s)
+              c.customer_code?.toLowerCase().includes(s)
           );
         }
         return list.slice(offset, offset + limit);
       }
     );
+  },
+
+  async assignCustomer(customerId, { sellerId = null, technicianId = null, warehouseId = null, supportId = null, notes = null } = {}, adminId = null) {
+    const cleanSeller = sellerId || null;
+    const cleanTech = technicianId || null;
+    const cleanWh = warehouseId || null;
+    const cleanSup = supportId || null;
+
+    const isFullyAssigned = !!(cleanSeller && cleanTech && cleanWh && cleanSup);
+    const isPartiallyAssigned = !!(cleanSeller || cleanTech || cleanWh || cleanSup);
+    const status = isFullyAssigned ? 'ASSIGNED' : (isPartiallyAssigned ? 'PARTIALLY_ASSIGNED' : 'PENDING_ASSIGNMENT');
+
+    return executeDb(
+      async () => {
+        // 1. Update customers table
+        const updateRes = await pool.query(
+          `UPDATE customers 
+           SET assigned_seller_id = $1,
+               assigned_technician_id = $2,
+               assigned_warehouse_id = $3,
+               assigned_support_id = $4,
+               assignment_status = $5,
+               assigned_at = CURRENT_TIMESTAMP,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $6
+           RETURNING *;`,
+          [cleanSeller, cleanTech, cleanWh, cleanSup, status, customerId]
+        );
+
+        if (updateRes.rows.length === 0) return null;
+        const updatedCust = updateRes.rows[0];
+
+        // 2. Insert into customer_assignments history table
+        await pool.query(
+          `INSERT INTO customer_assignments (
+             customer_id, assigned_by, seller_id, technician_id, warehouse_id, support_id, assignment_notes
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+          [customerId, adminId, cleanSeller, cleanTech, cleanWh, cleanSup, notes || null]
+        );
+
+        // 3. Record timeline event
+        await pool.query(
+          `INSERT INTO customer_timeline (
+             customer_id, event_type, title, description, metadata, created_by
+           ) VALUES ($1, 'TEAM_ASSIGNED', 'Operational Team Assigned', $2, $3, $4);`,
+          [
+            customerId,
+            `Admin updated team assignment. Status: ${status}.`,
+            JSON.stringify({ sellerId: cleanSeller, technicianId: cleanTech, warehouseId: cleanWh, supportId: cleanSup, status, notes }),
+            adminId,
+          ]
+        );
+
+        return updatedCust;
+      },
+      async () => {
+        const cust = fallbackStore.customers.find((c) => c.id === customerId);
+        if (!cust) return null;
+        cust.assigned_seller_id = cleanSeller;
+        cust.assigned_technician_id = cleanTech;
+        cust.assigned_warehouse_id = cleanWh;
+        cust.assigned_support_id = cleanSup;
+        cust.assignment_status = status;
+        cust.assigned_at = new Date().toISOString();
+        cust.updated_at = new Date().toISOString();
+
+        if (!fallbackStore.customer_assignments) fallbackStore.customer_assignments = [];
+        fallbackStore.customer_assignments.unshift({
+          id: crypto.randomUUID(),
+          customer_id: customerId,
+          assigned_by: adminId,
+          seller_id: cleanSeller,
+          technician_id: cleanTech,
+          warehouse_id: cleanWh,
+          support_id: cleanSup,
+          assignment_notes: notes || null,
+          assigned_at: new Date().toISOString(),
+        });
+
+        fallbackStore.timeline.unshift({
+          id: crypto.randomUUID(),
+          customer_id: customerId,
+          event_type: 'TEAM_ASSIGNED',
+          title: 'Operational Team Assigned',
+          description: `Admin updated team assignment. Status: ${status}.`,
+          metadata: { sellerId: cleanSeller, technicianId: cleanTech, warehouseId: cleanWh, supportId: cleanSup, status, notes },
+          created_by: adminId,
+          created_at: new Date().toISOString(),
+        });
+
+        return cust;
+      }
+    );
+  },
+
+  async getEligibleAssignees() {
+    return executeDb(
+      async () => {
+        const res = await pool.query(
+          `SELECT id, full_name, email, role, phone 
+           FROM users 
+           WHERE is_active = true 
+           ORDER BY role ASC, full_name ASC;`
+        );
+        return res.rows.map((r) => ({
+          id: r.id,
+          fullName: r.full_name,
+          email: r.email,
+          role: r.role,
+          phone: r.phone,
+        }));
+      },
+      async () => {
+        return [
+          { id: 'u-sales-01', fullName: 'Priya Verma', email: 'sales@sunpower.com', role: 'Sales', phone: '+91 98765 00002' },
+          { id: 'u-tech-01', fullName: 'Vikram Singh', email: 'technician@sunpower.com', role: 'Technician', phone: '+91 98765 00004' },
+          { id: 'u-wh-01', fullName: 'Amit Patel', email: 'warehouse@sunpower.com', role: 'Warehouse', phone: '+91 98765 00003' },
+          { id: 'u-sup-01', fullName: 'Sneha Kulkarni', email: 'support@sunpower.com', role: 'Support', phone: '+91 98765 00005' },
+        ];
+      }
+    );
+  },
+
+  async getCustomerAssignmentHistory(customerId) {
+    return executeDb(
+      async () => {
+        const sql = `
+          SELECT 
+            ca.*,
+            u_admin.full_name AS assigned_by_name,
+            u_seller.full_name AS seller_name,
+            u_tech.full_name AS technician_name,
+            u_wh.full_name AS warehouse_name,
+            u_sup.full_name AS support_name
+          FROM customer_assignments ca
+          LEFT JOIN users u_admin ON ca.assigned_by = u_admin.id
+          LEFT JOIN users u_seller ON ca.seller_id = u_seller.id
+          LEFT JOIN users u_tech ON ca.technician_id = u_tech.id
+          LEFT JOIN users u_wh ON ca.warehouse_id = u_wh.id
+          LEFT JOIN users u_sup ON ca.support_id = u_sup.id
+          WHERE ca.customer_id = $1
+          ORDER BY ca.assigned_at DESC;
+        `;
+        const res = await pool.query(sql, [customerId]);
+        return res.rows;
+      },
+      async () => {
+        return (fallbackStore.customer_assignments || []).filter((a) => a.customer_id === customerId);
+      }
+    );
+  },
+
+  async getCustomerPublicView(customerId) {
+    const customer = await this.getCustomerById(customerId);
+    if (!customer) return null;
+
+    return {
+      customerCode: customer.customer_code,
+      fullName: customer.full_name,
+      solarRequirement: customer.solar_requirement || 'On-Grid Solar System',
+      requiredCapacityKw: customer.required_capacity_kw || 3.0,
+      addressCity: customer.address_city,
+      addressState: customer.address_state,
+      installationLocation: customer.installation_location,
+      assignmentStatus: customer.assignment_status || 'PENDING_ASSIGNMENT',
+      assignedTeam: {
+        salesRepresentative: customer.assigned_seller_name
+          ? { name: customer.assigned_seller_name, email: customer.assigned_seller_email, role: 'Sales Partner' }
+          : null,
+        leadTechnician: customer.assigned_technician_name
+          ? { name: customer.assigned_technician_name, email: customer.assigned_technician_email, role: 'Lead Field Technician' }
+          : null,
+        warehouseManager: customer.assigned_warehouse_name
+          ? { name: customer.assigned_warehouse_name, email: customer.assigned_warehouse_email, role: 'Operations & Dispatch' }
+          : null,
+        customerSupportOfficer: customer.assigned_support_name
+          ? { name: customer.assigned_support_name, email: customer.assigned_support_email, role: 'Customer Support Executive' }
+          : null,
+      },
+      registrationDate: customer.created_at,
+    };
   },
 
   async updateCustomer(id, updates) {

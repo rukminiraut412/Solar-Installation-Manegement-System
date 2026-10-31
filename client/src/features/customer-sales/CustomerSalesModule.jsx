@@ -66,29 +66,29 @@ export default function CustomerSalesModule({ initialTab = 'enquiries' }) {
   return (
     <div className="space-y-6">
       {/* Module Title Banner */}
-      <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 shadow-xl">
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1">
-              <Sun className="h-4 w-4" /> Member 2 &bull; Customer &amp; Sales Management
+            <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 uppercase tracking-wider mb-1">
+              <Sun className="h-4 w-4 text-emerald-600" /> Customer &amp; Sales Management
             </div>
-            <h1 className="text-2xl font-extrabold text-white tracking-tight">
+            <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">
               Solar Customer Journey &amp; Sales Pipeline
             </h1>
-            <p className="text-xs text-slate-400 mt-1 max-w-2xl">
+            <p className="text-xs text-slate-600 mt-1 max-w-2xl">
               End-to-end solar sales workflow: lead acquisition, technical feasibility survey, dynamic bill of materials quotation, customer digital acceptance, and operations handover.
             </p>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 font-mono text-xs font-bold flex items-center gap-1.5">
-              <Sparkles className="h-3.5 w-3.5" /> 100% End-to-End
+            <span className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5" /> Commercial Active
             </span>
           </div>
         </div>
 
         {/* Navigation Tabs */}
-        <div className="mt-6 flex flex-wrap gap-2 border-t border-slate-800/80 pt-4">
+        <div className="mt-6 flex flex-wrap gap-2 border-t border-slate-200 pt-4">
           {TABS.map((tab) => {
             const isActive = activeSubTab === tab.id;
             const Icon = tab.icon;
@@ -98,11 +98,11 @@ export default function CustomerSalesModule({ initialTab = 'enquiries' }) {
                 onClick={() => setActiveSubTab(tab.id)}
                 className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
                   isActive
-                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                    : 'bg-slate-950/60 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800/80'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'bg-slate-50 text-slate-700 hover:text-slate-900 hover:bg-slate-100 border border-slate-200'
                 }`}
               >
-                <Icon className={`h-4 w-4 ${isActive ? 'text-slate-950' : 'text-amber-400'}`} />
+                <Icon className={`h-4 w-4 ${isActive ? 'text-white' : 'text-slate-500'}`} />
                 <span>{tab.label}</span>
               </button>
             );

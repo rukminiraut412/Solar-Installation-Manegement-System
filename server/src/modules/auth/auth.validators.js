@@ -19,3 +19,17 @@ export const createUserSchema = z.object({
   }),
   phone: z.string().optional(),
 });
+
+export const registerSchema = z.object({
+  fullName: z.string().trim().min(2, 'Full name must be at least 2 characters'),
+  email: z.string().trim().email('Invalid email address format'),
+  phone: z.string().trim().min(6, 'Mobile number is required'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  businessName: z.string().trim().optional(),
+  address: z.string().trim().optional(),
+});
+
+export const updateUserStatusSchema = z.object({
+  isActive: z.boolean({ required_error: 'isActive boolean is required' }),
+});
+

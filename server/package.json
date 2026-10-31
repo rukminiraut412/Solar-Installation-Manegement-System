@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "vitest run",
+    "test": "vitest run --exclude=**/support-finance/** && node --test src/modules/support-finance/support-finance.test.js",
+    "test:vitest": "vitest run --exclude=**/support-finance/**",
+    "test:node": "node --test src/modules/support-finance/support-finance.test.js",
     "db:migrate": "node src/db/migrate.js"
   },
   "dependencies": {

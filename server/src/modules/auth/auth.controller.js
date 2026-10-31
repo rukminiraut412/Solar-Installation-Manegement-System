@@ -102,6 +102,49 @@ export class AuthController {
     }
   }
 
+  static async register(req, res, next) {
+    try {
+      const { fullName, email, password, phone, businessName, address } = req.body;
+      const newUser = await AuthService.registerSeller({
+        fullName,
+        email,
+        password,
+        phone,
+        businessName,
+        address,
+      });
+
+      return successResponse(res, newUser, 'Seller account registered successfully. You may now log in.', 201);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async listUsers(req, res, next) {
+    try {
+      const users = await AuthService.listUsers();
+      return successResponse(res, users, 'Users retrieved successfully', 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async toggleUserStatus(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { isActive } = req.body;
+      const updatedUser = await AuthService.toggleUserStatus({
+        userId: id,
+        isActive,
+        adminId: req.user.id,
+      });
+
+      return successResponse(res, updatedUser, `User ${isActive ? 'activated' : 'deactivated'} successfully`, 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
   static async createUser(req, res, next) {
     try {
       const { email, password, fullName, role, phone } = req.body;
@@ -120,3 +163,4 @@ export class AuthController {
     }
   }
 }
+

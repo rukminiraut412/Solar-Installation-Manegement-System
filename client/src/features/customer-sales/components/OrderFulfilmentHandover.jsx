@@ -54,7 +54,7 @@ export default function OrderFulfilmentHandover() {
       const res = await customerSalesApi.reserveStock(projectId);
       setFeedback({
         type: 'success',
-        text: `Member 3 stock reservation processed! Status: ${res.data?.status || 'RESERVED'}. Shortage count: ${
+        text: `Warehouse stock reservation processed! Status: ${res.data?.status || 'RESERVED'}. Shortage count: ${
           res.data?.shortageCount || 0
         }.`,
       });
@@ -76,7 +76,7 @@ export default function OrderFulfilmentHandover() {
       const res = await customerSalesApi.createPaymentOrder(orderId, idempotencyKey);
       setFeedback({
         type: 'success',
-        text: `Razorpay test order initialized via Member 4 Finance Engine! Razorpay Order ID: ${
+        text: `Razorpay test order initialized via Finance Engine! Razorpay Order ID: ${
           res.data?.paymentRequest?.razorpay_order_id || 'order_test_9981'
         }.`,
       });
@@ -102,7 +102,7 @@ export default function OrderFulfilmentHandover() {
           </h2>
           <p className="text-xs text-slate-400 mt-1">
             Section 3 &amp; BR-QTE-002 Invariant: Orders and installation projects are created strictly after quotation acceptance.
-            Member 2 authors the frozen BOM snapshot and exposes the handover contract to Member 3.
+            The frozen BOM snapshot is authoritatively transferred to Operations &amp; Warehouse.
           </p>
         </div>
       </div>
@@ -267,7 +267,7 @@ export default function OrderFulfilmentHandover() {
                   </span>
                 </div>
                 <span className="text-[9px] text-slate-500 mt-1 block">
-                  Member 3 verifies payment before releasing dispatch manifest
+                  Warehouse verifies payment before releasing dispatch manifest
                 </span>
               </div>
             </div>
@@ -277,9 +277,9 @@ export default function OrderFulfilmentHandover() {
               <div className="flex items-center justify-between mb-3">
                 <h4 className="text-xs font-bold text-white flex items-center gap-2">
                   <Layers className="h-4 w-4 text-emerald-400" />
-                  Frozen Commercial BOM Snapshot (Authoritatively Owned by Member 2)
+                  Frozen Commercial BOM Snapshot
                 </h4>
-                <span className="text-[10px] text-slate-500">Immutable snapshot transferred to Member 3</span>
+                <span className="text-[10px] text-slate-500">Immutable snapshot transferred to Warehouse &amp; Operations</span>
               </div>
 
               <div className="overflow-x-auto">
@@ -340,7 +340,7 @@ export default function OrderFulfilmentHandover() {
                     disabled={actionLoading}
                     className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg flex items-center gap-2"
                   >
-                    <Truck className="h-4 w-4" /> Trigger Member 3 Stock Reservation
+                    <Truck className="h-4 w-4" /> Reserve Warehouse Stock
                   </button>
                 )}
               </div>

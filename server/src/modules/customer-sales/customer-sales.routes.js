@@ -12,6 +12,7 @@ import { validate } from '../../middleware/validate.middleware.js';
 import {
   createCustomerSchema,
   updateCustomerSchema,
+  assignCustomerSchema,
   createEnquirySchema,
   publicEnquirySchema,
   qualifyEnquirySchema,
@@ -40,6 +41,9 @@ router.get('/public/quotations/:token', CustomerSalesController.getPublicQuotati
 router.post('/public/quotations/:token/accept', validate(acceptQuoteSchema), CustomerSalesController.acceptPublicQuotation);
 router.post('/public/quotations/:token/decline', validate(declineQuoteSchema), CustomerSalesController.declinePublicQuotation);
 
+// Public Customer Dossier View (Phase 3.E)
+router.get('/customers/:id/public-view', CustomerSalesController.getCustomerPublicView);
+
 // =========================================================================
 // 2. CUSTOMER MANAGEMENT ENDPOINTS
 // =========================================================================
@@ -54,15 +58,30 @@ router.post(
 router.get(
   '/customers',
   authenticate,
-  authorize('Admin/Owner', 'Sales', 'Support'),
+  authorize('Admin/Owner', 'Sales', 'Warehouse', 'Technician', 'Support'),
   CustomerSalesController.listCustomers
+);
+
+router.get(
+  '/assignees',
+  authenticate,
+  authorize('Admin/Owner', 'Sales'),
+  CustomerSalesController.getEligibleAssignees
 );
 
 router.get(
   '/customers/:id',
   authenticate,
-  authorize('Admin/Owner', 'Sales', 'Support'),
+  authorize('Admin/Owner', 'Sales', 'Warehouse', 'Technician', 'Support'),
   CustomerSalesController.getCustomer
+);
+
+router.post(
+  '/customers/:id/assign',
+  authenticate,
+  authorize('Admin/Owner'),
+  validate(assignCustomerSchema),
+  CustomerSalesController.assignCustomer
 );
 
 router.put(
@@ -76,7 +95,7 @@ router.put(
 router.get(
   '/customers/:id/timeline',
   authenticate,
-  authorize('Admin/Owner', 'Sales', 'Support'),
+  authorize('Admin/Owner', 'Sales', 'Warehouse', 'Technician', 'Support'),
   CustomerSalesController.getCustomerTimeline
 );
 

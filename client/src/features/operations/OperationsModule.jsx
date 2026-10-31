@@ -48,28 +48,28 @@ export default function OperationsModule({ initialTab = 'inventory' }) {
   return (
     <div className="space-y-6">
       {/* Module Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-amber-950/20 to-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold uppercase tracking-wider mb-2">
-              <Boxes className="h-3.5 w-3.5" /> Operations & Fulfilment Hub (Member 3)
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold uppercase tracking-wider mb-2">
+              <Boxes className="h-3.5 w-3.5 text-emerald-600" /> Operations &amp; Fulfilment Hub
             </div>
-            <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
-              Solar Operations, Fulfilment & Rooftop Field Execution
+            <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">
+              Solar Operations, Fulfilment &amp; Rooftop Field Execution
             </h1>
-            <p className="mt-1 text-xs md:text-sm text-slate-400 max-w-2xl">
-              End-to-end operational lifecycle: warehouse stock balance invariants, Member 2 BOM consumption, 100% serial barcode gates, certified electrical crew scheduling, and automated warranties.
+            <p className="mt-1 text-xs md:text-sm text-slate-600 max-w-2xl">
+              End-to-end operational lifecycle: warehouse stock balance invariants, BOM consumption, 100% serial barcode gates, certified electrical crew scheduling, and automated warranties.
             </p>
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-right">
-            <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800">
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
               <span className="text-[10px] uppercase font-bold text-slate-500">Inventory Status</span>
-              <div className="font-mono text-sm font-bold text-emerald-400">100% Balanced</div>
+              <div className="font-mono text-sm font-bold text-emerald-700">100% Balanced</div>
             </div>
-            <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800">
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
               <span className="text-[10px] uppercase font-bold text-slate-500">Electrical Lead</span>
-              <div className="font-mono text-sm font-bold text-amber-400">Certified Strict</div>
+              <div className="font-mono text-sm font-bold text-amber-600">Certified Strict</div>
             </div>
           </div>
         </div>
@@ -87,8 +87,8 @@ export default function OperationsModule({ initialTab = 'inventory' }) {
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold whitespace-nowrap transition-all ${
                 isActive
-                  ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 ring-1 ring-amber-400'
-                  : 'bg-slate-900/80 border border-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-800/80'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'bg-white border border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50'
               }`}
             >
               <Icon className="h-4 w-4 shrink-0" />

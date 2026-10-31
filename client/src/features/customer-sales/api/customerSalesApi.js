@@ -30,6 +30,10 @@ export const customerSalesApi = {
   getCustomer: (id) => api.get(`/customers/${id}`).then((r) => r.data),
   updateCustomer: (id, data) => api.put(`/customers/${id}`, data).then((r) => r.data),
   getCustomerTimeline: (id) => api.get(`/customers/${id}/timeline`).then((r) => r.data),
+  assignCustomer: (id, data) => api.post(`/customers/${id}/assign`, data).then((r) => r.data),
+  getEligibleAssignees: () => api.get('/assignees').then((r) => r.data),
+  getCustomerPublicView: (id) => api.get(`/customers/${id}/public-view`).then((r) => r.data),
+
 
   // Enquiries
   createEnquiry: (data) => api.post('/enquiries', data).then((r) => r.data),

@@ -252,6 +252,121 @@ export class AuthService {
   }
 
   /**
+   * Public Seller Registration - Strictly defaults role to Sales
+   * Never trusts client-supplied roles.
+   */
+  static async registerSeller({ fullName, email, password, phone = null, businessName = null, address = null }) {
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const existing = await db.query(
+      `SELECT id FROM users WHERE LOWER(email) = $1;`,
+      [normalizedEmail]
+    );
+
+    if (existing.rows.length > 0) {
+      throw new ConflictError('An account with this email address already exists. Please log in.');
+    }
+
+    const passwordHash = await hashPassword(password);
+    // STRICT SECURITY: Public registration is locked to ROLES.SALES
+    const role = ROLES.SALES;
+
+    const res = await db.query(
+      `INSERT INTO users (email, password_hash, full_name, role, phone)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, email, full_name, role, phone, is_active, created_at;`,
+      [normalizedEmail, passwordHash, fullName, role, phone]
+    );
+
+    const newUser = res.rows[0];
+
+    await recordAuditLog({
+      userId: newUser.id,
+      action: 'PUBLIC_SELLER_REGISTERED',
+      entity: 'USER',
+      entityId: newUser.id,
+      newValues: {
+        email: newUser.email,
+        role: newUser.role,
+        fullName: newUser.full_name,
+        businessName,
+        address,
+      },
+    });
+
+    return {
+      id: newUser.id,
+      email: newUser.email,
+      fullName: newUser.full_name,
+      role: newUser.role,
+      phone: newUser.phone,
+      isActive: newUser.is_active,
+      createdAt: newUser.created_at,
+    };
+  }
+
+  /**
+   * List all users (Admin/Owner restricted)
+   */
+  static async listUsers() {
+    const res = await db.query(
+      `SELECT id, email, full_name, role, phone, is_active, created_at 
+       FROM users 
+       ORDER BY created_at DESC;`
+    );
+
+    return res.rows.map((row) => ({
+      id: row.id,
+      email: row.email,
+      fullName: row.full_name,
+      role: row.role,
+      phone: row.phone,
+      isActive: row.is_active,
+      createdAt: row.created_at,
+    }));
+  }
+
+  /**
+   * Activate or deactivate user account (Admin/Owner restricted)
+   */
+  static async toggleUserStatus({ userId, isActive, adminId }) {
+    if (userId === adminId && !isActive) {
+      throw new BadRequestError('Administrators cannot deactivate their own account.');
+    }
+
+    const res = await db.query(
+      `UPDATE users 
+       SET is_active = $1, updated_at = CURRENT_TIMESTAMP 
+       WHERE id = $2 
+       RETURNING id, email, full_name, role, phone, is_active;`,
+      [isActive, userId]
+    );
+
+    if (res.rows.length === 0) {
+      throw new NotFoundError('User not found');
+    }
+
+    const updatedUser = res.rows[0];
+
+    await recordAuditLog({
+      userId: adminId,
+      action: isActive ? 'USER_ACTIVATED' : 'USER_DEACTIVATED',
+      entity: 'USER',
+      entityId: updatedUser.id,
+      newValues: { isActive: updatedUser.is_active },
+    });
+
+    return {
+      id: updatedUser.id,
+      email: updatedUser.email,
+      fullName: updatedUser.full_name,
+      role: updatedUser.role,
+      phone: updatedUser.phone,
+      isActive: updatedUser.is_active,
+    };
+  }
+
+  /**
    * Create a new user (strictly Admin/Owner controlled)
    */
   static async createUser({ email, password, fullName, role, phone = null, creatorId = null }) {
