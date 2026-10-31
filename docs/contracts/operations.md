@@ -726,6 +726,53 @@ All responses strictly follow Member 1's standardized envelope:
 }
 ```
 
+### 12.7 Technician Availability Query Envelope (Consumed by Member 2 CRM)
+- **`GET /api/v1/operations/technicians/availability?date=YYYY-MM-DD&slot=SLOT_NAME`**
+```json
+{
+  "success": true,
+  "message": "Available technicians retrieved successfully",
+  "data": [
+    {
+      "technicianId": "u2-0000-0000-0000-000000000002",
+      "fullName": "Kiran Rathod",
+      "skills": ["ELECTRICAL_LEAD", "SOLAR_PV"],
+      "isAvailable": true,
+      "currentDailyLoad": 1
+    },
+    {
+      "technicianId": "u2-0000-0000-0000-000000000003",
+      "fullName": "Vikram Singh",
+      "skills": ["STRUCTURAL_MOUNT", "HELPER"],
+      "isAvailable": true,
+      "currentDailyLoad": 0
+    }
+  ]
+}
+```
+
+### 12.8 Project Stock Reservation Trigger Envelope (Invoked by Member 2)
+- **`POST /api/v1/operations/projects/:id/reserve-stock`**
+```json
+{
+  "success": true,
+  "message": "Stock reservation processed successfully",
+  "data": {
+    "projectId": "7e01b230-8a1a-4d00-b2e1-01aeb33b2002",
+    "status": "RESERVED",
+    "totalItems": 5,
+    "allocatedItems": 5,
+    "shortageCount": 0,
+    "shortages": [],
+    "reservationIds": [
+      "res-0001-0000-0000-000000000001",
+      "res-0001-0000-0000-000000000002"
+    ]
+  }
+}
+```
+*Note on Shortage Detection:* If any item has insufficient available quantity ($Q_{available} < Q_{required}$), `status` evaluates to `SHORTAGE_FLAGGED`, `shortageCount` indicates the number of deficit lines, and `shortages` returns an itemized deficit list.
+
 ---
 
 ## 13. PostgreSQL Database Schema Specification (`102_operations.sql`)
