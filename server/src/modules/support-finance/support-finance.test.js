@@ -596,8 +596,65 @@ test('22. Cross-Module Contract: Operations Warranty Adapter Schema Alignment (d
   assert.ok(result.record.endDate);
   assert.equal(typeof result.isAuthoritativeDB, 'boolean');
 
-  // Verify backwards-compatibility snake_case fields also remain accessible
   assert.equal(result.record.serial_number, 'INV-SN-887123');
   assert.equal(result.record.product_name, 'SunGrow 3.3 kW String Inverter');
   assert.equal(result.record.duration_months, 24);
 });
+
+test('23. RBAC & Unauthorized Access: Enforcement of Approved Roles and Rejection of Unauthorized/Invented Roles', async () => {
+  const adminOwnerGuard = requireRole(['Admin/Owner', 'Admin']);
+
+  // Case 1: Unauthenticated request (no req.user) must receive 401
+  const reqUnauth = {};
+  let statusCode = null;
+  let errorPayload = null;
+  const resUnauth = {
+    status(code) { statusCode = code; return this; },
+    json(data) { errorPayload = data; }
+  };
+  adminOwnerGuard(reqUnauth, resUnauth, () => { assert.fail('Should not call next for unauthenticated request'); });
+  assert.equal(statusCode, 401);
+  assert.equal(errorPayload?.error?.code, 'UNAUTHORIZED');
+
+  // Case 2: Unauthorized internal roles (Technician, Support, Sales) must receive 403 for Admin/Owner actions
+  const unauthorizedRoles = ['Technician', 'Support', 'Sales', 'Finance', 'Customer'];
+  for (const role of unauthorizedRoles) {
+    let forbiddenCode = null;
+    let forbiddenPayload = null;
+    const reqRole = { user: { id: `usr-${role}`, role } };
+    const resRole = {
+      status(code) { forbiddenCode = code; return this; },
+      json(data) { forbiddenPayload = data; }
+    };
+    adminOwnerGuard(reqRole, resRole, () => { assert.fail(`Should not call next for unauthorized role: ${role}`); });
+    assert.equal(forbiddenCode, 403, `Role ${role} must be rejected with 403 Forbidden on Admin/Owner endpoints`);
+    assert.equal(forbiddenPayload?.error?.code, 'FORBIDDEN');
+  }
+
+  // Case 3: Approved Admin/Owner role must be permitted
+  let nextCalled = false;
+  const reqApproved = { user: { id: 'usr-admin-1', role: 'Admin/Owner' } };
+  adminOwnerGuard(reqApproved, {}, () => { nextCalled = true; });
+  assert.equal(nextCalled, true, 'Admin/Owner role must be allowed');
+});
+
+test('24. Warranty Integration: Sole Authoritative Table serial_items & Missing DB Table Handling', async () => {
+  // Authoritative table verification:
+  // In production mode (or when DB tables are absent), WarrantyAdapter must never fabricate coverage
+  const origNodeEnv = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'production';
+    
+    // Look up a serial that is not in any live DB (or when DB connection fails/tables missing)
+    const result = await WarrantyAdapter.checkEligibility('NONEXISTENT-OR-OFFLINE-SERIAL-999');
+    
+    assert.equal(result.status, 'UNAVAILABLE');
+    assert.equal(result.isAuthoritativeDB, false);
+    assert.equal(result.record, null);
+    assert.ok(result.message.includes('Authoritative warranty record'));
+    assert.ok(result.message.includes('unavailable'));
+  } finally {
+    process.env.NODE_ENV = origNodeEnv;
+  }
+});
+

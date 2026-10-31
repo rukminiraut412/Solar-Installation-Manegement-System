@@ -3,15 +3,11 @@
  * Specification Authority: SOLAR_MANAGEMENT_SYSTEM.md (§7.5, §7.6, §20.1 T-19)
  * Operations Contract Authority: docs/contracts/operations.md (§10.3, §15.3, §17)
  * 
- * Provides an isolated, dual-resilient interface between Member 4 (Support & Finance)
+ * Provides an isolated interface between Member 4 (Support & Finance)
  * and Member 3 (Operations - Warranty & Serialized Stock).
  * 
- * Contract Alignment:
- * - Direct SQL Query: `warranty_records` JOIN `serial_items` JOIN `products`
- *   (with fallback to `serial_registry` view if present).
- * - Standard REST Endpoint: `GET /api/v1/operations/warranties/:serialNumber`
- * - Standard Response Envelope: Returns normalized status ('WITHIN_PERIOD', 'EXPIRED', 'VOID', 'NOT_ACTIVE')
- *   with dual camelCase and snake_case field access.
+ * Authoritative Table: `serial_items` (defined in 001_foundation.sql / Member 3 contract).
+ * Speculative views or unverified fallbacks like 'serial_registry' are strictly omitted.
  * 
  * Never silently treats unavailable or offline warranty data as confirmed coverage.
  */
@@ -27,7 +23,7 @@ export const WarrantyAdapter = {
 
   /**
    * Look up warranty status for a component by serial number.
-   * Queries PostgreSQL `warranty_records` (via `serial_items` or `serial_registry`).
+   * Queries PostgreSQL `warranty_records` JOIN `serial_items` JOIN `products`.
    * In production mode, never silently falls back to in-memory fixtures.
    */
   async checkEligibility(serialNumber, claimDate = new Date().toISOString().split('T')[0]) {
@@ -42,8 +38,9 @@ export const WarrantyAdapter = {
       };
     }
 
-    // 1. Primary Query: Matching 001_foundation.sql & docs/contracts/operations.md §15.3
-    const primarySql = `
+    // Authoritative Query: Matching 001_foundation.sql & docs/contracts/operations.md §15.3
+    // Sole authoritative table is serial_items.
+    const sql = `
       SELECT 
         w.id AS warranty_id,
         w.warranty_code,
@@ -63,42 +60,12 @@ export const WarrantyAdapter = {
     `;
 
     try {
-      const res = await query(primarySql, [cleanSerial]);
+      const res = await query(sql, [cleanSerial]);
       if (res && res.rows && res.rows.length > 0) {
         return this._evaluateDates(res.rows[0], claimDate, true);
       }
     } catch (err) {
-      // 2. Secondary Query: If serial_items is named serial_registry in transitional schemas
-      if (err.message && err.message.includes('serial_items')) {
-        const fallbackViewSql = `
-          SELECT 
-            w.id AS warranty_id,
-            w.warranty_code,
-            w.duration_months,
-            w.start_date,
-            w.end_date,
-            w.status AS warranty_status,
-            w.party,
-            w.scope,
-            s.serial_number,
-            p.name AS product_name
-          FROM warranty_records w
-          JOIN serial_registry s ON (w.serial_item_id = s.id)
-          JOIN products p ON s.product_id = p.id
-          WHERE LOWER(s.serial_number) = LOWER($1)
-          LIMIT 1;
-        `;
-        try {
-          const resView = await query(fallbackViewSql, [cleanSerial]);
-          if (resView && resView.rows && resView.rows.length > 0) {
-            return this._evaluateDates(resView.rows[0], claimDate, true);
-          }
-        } catch (viewErr) {
-          console.warn(`[WARRANTY-ADAPTER-NOTICE] Operations view query fallback: ${viewErr.message}`);
-        }
-      } else {
-        console.warn(`[WARRANTY-ADAPTER-NOTICE] Operations SQL query: ${err.message}`);
-      }
+      console.warn(`[WARRANTY-ADAPTER-NOTICE] Operations SQL query: ${err.message}`);
     }
 
     // In production mode, if the database did not yield an authoritative record,

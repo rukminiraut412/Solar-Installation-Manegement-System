@@ -5,7 +5,10 @@
  * Foundation Role Contract: Member 1 ROLES ('Admin/Owner', 'Sales', 'Warehouse', 'Technician', 'Support')
  *
  * Implements strict RBAC route guards using shared requireRole middleware.
- * Supports both 'Admin' and 'Admin/Owner' roles seamlessly.
+ * Uses exact project roles matching Member 1 Platform Foundation.
+ * No speculative 'Finance' or 'Customer' roles are invented.
+ * Finance actions are governed by Admin/Owner per Member 1 permission matrix.
+ * Customer portal login/authentication is explicitly marked PENDING.
  */
 
 import { Router } from 'express';
@@ -14,12 +17,10 @@ import { authenticate, requireRole } from '../../middleware/auth.middleware.js';
 
 const router = Router();
 
-// Role groups matching Member 1's Platform Foundation role schema
-const ADMIN_ROLES = ['Admin', 'Admin/Owner'];
-const SUPPORT_ADMIN_ROLES = ['Admin', 'Admin/Owner', 'Support'];
-const FINANCE_ADMIN_ROLES = ['Admin', 'Admin/Owner', 'Finance'];
-const TECH_ADMIN_ROLES = ['Admin', 'Admin/Owner', 'Technician'];
-const CUSTOMER_ADMIN_ROLES = ['Admin', 'Admin/Owner', 'Customer'];
+// Exact project roles matching Member 1 (Platform Foundation)
+const ADMIN_ROLES = ['Admin/Owner', 'Admin'];
+const SUPPORT_ADMIN_ROLES = ['Admin/Owner', 'Admin', 'Support'];
+const TECH_ADMIN_ROLES = ['Admin/Owner', 'Admin', 'Technician'];
 
 // Health Check
 router.get('/health', (req, res) => {
@@ -53,8 +54,8 @@ router.post('/cases/:id/technician-complete', authenticate, requireRole(TECH_ADM
 // Support Review
 router.post('/cases/:id/support-review', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.supportReview);
 
-// Customer Confirmation / Dispute
-router.post('/cases/:id/customer-confirmation', authenticate, requireRole(CUSTOMER_ADMIN_ROLES), SupportFinanceController.customerConfirmation);
+// Customer Confirmation / Dispute (Support/Admin logs customer confirmation; Customer portal auth is PENDING)
+router.post('/cases/:id/customer-confirmation', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.customerConfirmation);
 
 // Case Closure Gate
 router.post('/cases/:id/close', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.closeCase);
@@ -93,8 +94,9 @@ router.post('/payments/simulate-webhook', SupportFinanceController.handleWebhook
 router.get('/payments/ledger', authenticate, SupportFinanceController.getPaymentsLedger);
 router.get('/payments', authenticate, SupportFinanceController.getPaymentsLedger);
 
-router.post('/payments/manual', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.recordManualPayment);
-router.post('/payments/offline', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.recordManualPayment);
+// Finance action: strictly Admin/Owner per Member 1 permission matrix
+router.post('/payments/manual', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.recordManualPayment);
+router.post('/payments/offline', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.recordManualPayment);
 
 // ====================================================================
 // 4. INVOICES, EXPENSES, TIMESHEETS, SUBSIDY & P/L
@@ -105,11 +107,12 @@ router.get('/finance/invoices', authenticate, SupportFinanceController.listInvoi
 router.get('/expenses', authenticate, SupportFinanceController.listExpenses);
 router.get('/finance/expenses', authenticate, SupportFinanceController.listExpenses);
 
-router.post('/expenses', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.createExpense);
-router.post('/finance/expenses', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.createExpense);
+// Finance action: strictly Admin/Owner per Member 1 permission matrix
+router.post('/expenses', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.createExpense);
+router.post('/finance/expenses', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.createExpense);
 
-router.post('/expenses/:id/approve', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.approveExpense);
-router.patch('/finance/expenses/:id/review', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.approveExpense);
+router.post('/expenses/:id/approve', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.approveExpense);
+router.patch('/finance/expenses/:id/review', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.approveExpense);
 
 router.get('/technician-pay', authenticate, SupportFinanceController.listTechnicianPay);
 router.get('/finance/technician-pay', authenticate, SupportFinanceController.listTechnicianPay);
@@ -117,8 +120,8 @@ router.get('/finance/technician-pay', authenticate, SupportFinanceController.lis
 router.get('/subsidy/:projectId', authenticate, SupportFinanceController.getSubsidyStatus);
 router.get('/finance/subsidies', authenticate, SupportFinanceController.getSubsidyStatus);
 
-router.patch('/subsidy/:projectId', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.updateSubsidy);
-router.patch('/finance/subsidies/:projectId/checklist', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.updateSubsidy);
+router.patch('/subsidy/:projectId', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.updateSubsidy);
+router.patch('/finance/subsidies/:projectId/checklist', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.updateSubsidy);
 
 router.get('/profitability/:projectId', authenticate, SupportFinanceController.getProjectProfitability);
 router.get('/finance/project-profitability/:projectId', authenticate, SupportFinanceController.getProjectProfitability);
