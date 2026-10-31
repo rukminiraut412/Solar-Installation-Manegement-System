@@ -1,53 +1,55 @@
-# CUSTOMER & SALES MODULE CONTRACT
+# CUSTOMER & SALES MODULE CONTRACT (REVISED)
 **Project:** Solar Installation Management System (SunPower Solutions)  
 **Module:** Customer & Sales (`customer-sales`)  
 **Owner:** Member 2 (Customer & Sales Lead)  
-**Document Version:** 1.0.0  
+**Document Version:** 1.1.0  
 **Authority:** [`SOLAR_MANAGEMENT_SYSTEM.md`](file:///c:/Users/HP/Desktop/Solar-Installation-Manegement-System/SOLAR_MANAGEMENT_SYSTEM.md)  
 **API Mount Prefix:** `/api/v1/customer-sales`  
 **Database Migration Target:** `server/src/db/migrations/101_customer_sales.sql`  
 
 ---
 
-## 1. Executive Summary & Module Scope
+## 1. Executive Summary & Specification Alignment
 
-The **Customer & Sales Module** governs Stages 1 through 12 of the 26-Stage SunPower Solutions operational lifecycle. It transforms fragmented WhatsApp messages, phone calls, and manual registers into an automated, auditable, and traceable sales-to-project pipeline.
+The **Customer & Sales Module** governs the commercial and pre-installation lifecycle of SunPower Solutions. It replaces manual registers, scattered phone notes, and unrecorded WhatsApp quotes with an auditable, automated customer journey.
 
-### Core Objectives:
-1. **Intake & Zero-Lead-Loss CRM:** Public lead capture with instant sales assignment and automated duplicate detection across phone, email, and property address.
-2. **Technical Site Survey Governance:** Mobile-first rooftop feasibility capture (roof area, azimuth, tilt 10°–30°, shadow-free space, cable distance) with mandatory Cloudinary photo proofs.
-3. **Engineering Review Gate:** Strict architectural blockade preventing quotation generation prior to formal survey sign-off by engineering/sales management.
-4. **Standard Packages & Automated BOM Generator:** Automated bill of materials derivation for 1 kW to 5 kW On-Grid and Off-Grid systems, eliminating manual component memory errors.
-5. **Quotation Lifecycle & Digital Acceptance:** Versioned quotes with price validity locks, customer portal review, and cryptographic digital acceptance tokens.
-6. **Order Initialization & Operations Handover:** Automatic Order/Project creation following quote acceptance, providing a typed, documented handover contract to Member 3 (Operations & Fulfilment).
+### 1.1 Direct Authoritative Requirements from `SOLAR_MANAGEMENT_SYSTEM.md`
+Every requirement implemented in this module is verified against the specification text:
+1. **The Rooftop Inquiry:** Homeowner submits an online form asking for a solar system (e.g. 3 kW system under subsidy). Name, phone, address, and needs must land with the sales team instantly without vanishing.
+2. **Preliminary Check:** Sales representative calls the lead to check basic site viability: shadow-free roof space, monthly electricity bill, and grid connection suitability.
+3. **Physical Survey Visit:** If preliminary checks look good, a technician visits to measure roof direction, tilt, and cable distance.
+4. **Mandatory Survey Approval Gate:** *"Only after the survey is approved should the customer receive a quote."* (Explicit Spec Invariant).
+5. **Ready Templates & Automated BOM:** Quotation comes from a standard capacity template (1 kW to 5 kW, On-Grid or Off-Grid), and the exact parts list follows automatically: panels, inverter, stands, switches, wires, and safety parts without manual memory.
+6. **Order Confirmation & Customer Acceptance:** Customer accepts quote; order is initialized; warehouse and crew schedules are notified without manual phone calls.
+7. **Advance Payment Context:** *"A customer usually pays an advance, or the full amount, before work starts."* (Configurable business rule; advance percentage and payment gates are configurable).
 
 ---
 
 ## 2. Strict File & Directory Ownership Map
 
-Member 2 operates strictly within these assigned boundaries:
+Member 2 operates exclusively within the following boundaries:
 
 ```text
 Solar-Installation-Manegement-System/
 ├── docs/
 │   └── contracts/
-│       └── customer-sales.md                          [M2] # This authoritative contract
+│       └── customer-sales.md                          [M2] # Authoritative module contract
 ├── client/
 │   └── src/
 │       └── features/
-│           └── customer-sales/                        [M2] # Exclusive frontend feature folder
+│           └── customer-sales/                        [M2] # Exclusive frontend feature directory
 │               ├── components/
 │               │   ├── CustomerCard.jsx               [M2]
 │               │   ├── CustomerTimeline.jsx           [M2]
 │               │   ├── DuplicateMergeModal.jsx        [M2]
-│               │   ├── SurveyScheduleModal.jsx        [M2]
+│               │   ├── SurveyScheduleModal.jsx        [M2] # Survey request dialog
 │               │   ├── PhotoGallery.jsx               [M2]
 │               │   ├── PackageSelector.jsx            [M2]
 │               │   ├── BomTable.jsx                   [M2]
 │               │   └── QuoteAcceptModal.jsx           [M2]
 │               ├── pages/
-│               │   ├── PublicEnquiryPage.jsx          [M2] # Public landing enquiry form
-│               │   ├── EnquiryInboxPage.jsx           [M2] # Sales lead queue & deduplication
+│               │   ├── PublicEnquiryPage.jsx          [M2] # Public website landing form
+│               │   ├── EnquiryInboxPage.jsx           [M2] # Sales lead queue & duplicate alerts
 │               │   ├── CustomerListPage.jsx           [M2] # Filterable customer directory
 │               │   ├── CustomerDetailPage.jsx         [M2] # 360 customer dossier & timeline
 │               │   ├── SurveyExecutionPage.jsx        [M2] # Mobile field technician survey
@@ -63,7 +65,7 @@ Solar-Installation-Manegement-System/
         │   └── migrations/
         │       └── 101_customer_sales.sql             [M2] # Exclusive DDL migration
         └── modules/
-            └── customer-sales/                        [M2] # Exclusive backend feature folder
+            └── customer-sales/                        [M2] # Exclusive backend feature directory
                 ├── customerSales.routes.js            [M2] # Router mounted by Member 1
                 ├── customerSales.validators.js        [M2] # Zod schemas for all payloads
                 ├── controllers/
@@ -83,11 +85,11 @@ Solar-Installation-Manegement-System/
                     └── orderHandover.service.js       [M2]
 ```
 
-### Prohibited Actions:
-- **No modification of root files:** `package.json`, `package-lock.json`, `.gitignore`, `render.yaml`, `vercel.json`.
-- **No modification of server core:** `server/src/app.js`, `server/src/server.js`, `server/src/config/*`, `server/src/db/index.js`, `server/src/db/migrate.js`, `server/src/db/migrations/001_platform_foundation.sql`.
-- **No modification of shared client shell:** `client/src/App.jsx`, `client/src/main.jsx`, `client/src/components/layout/*`, `client/src/shared/*`.
-- **No modification of other members' migrations or modules:** `102_operations_fulfilment.sql`, `103_support_finance_ai.sql`, or their feature directories.
+### Prohibited Boundaries:
+- **No modification of root files:** `package.json`, `package-lock.json`, `render.yaml`, `vercel.json`.
+- **No modification of shared platform files (Member 1):** `server/src/app.js`, `server/src/server.js`, `server/src/config/*`, `server/src/db/index.js`, `server/src/db/migrate.js`, `server/src/db/migrations/001_platform_foundation.sql`, `client/src/App.jsx`.
+- **No modification of Operations (Member 3) or Support/Finance/AI (Member 4) files:** Migrations `102_*`, `103_*`, or their feature folders.
+- **No internal table assumptions:** All inter-module communication is governed by documented, versioned integration contracts and API boundaries.
 
 ---
 
@@ -95,570 +97,190 @@ Solar-Installation-Manegement-System/
 
 ### 3.1 Customer Management & Customer Timeline
 
-1. **Authoritative Customer Profile:**
-   - Single source of truth for residential and commercial property owners.
+1. **Customer Record Structure:**
+   - Single authoritative record per customer.
    - Indexed by unique phone number and email.
-   - Properties: Full Name, Primary Phone, Secondary Phone, Email, Preferred Contact Channel, Billing Address, Installation Site Address, Pincode, City, State, Landmark.
+   - Fields: Full Name, Primary Phone, Secondary Phone, Email, Preferred Contact Channel, Billing Address, Installation Site Address, City, State, Pincode, Landmark, Notes.
 2. **Customer Lifecycle States:**
    `LEAD` ➔ `PROSPECT` ➔ `SURVEY_SCHEDULED` ➔ `SURVEY_COMPLETED` ➔ `QUOTED` ➔ `ORDER_CONFIRMED` ➔ `ACTIVE_PROJECT` ➔ `MAINTENANCE`
 3. **Customer 360 Dossier:**
-   - Unified API response aggregating: Contact Details, Active Enquiries, Scheduled/Historical Surveys, Quotations with BOM snapshots, Orders/Projects, Installed Equipment Serials, and Open Support Tickets.
-4. **Append-Only Customer Timeline:**
-   - Every operational touchpoint records a timestamped event into `customer_timeline`:
+   - Unified API response aggregating: Contact Info, Active Enquiries, Surveys, Quotations, Orders, Installed Serials (queried via Operations contract), and Support Tickets (queried via Support contract).
+4. **Authoritative Customer Timeline:**
+   - Append-only event history in table `customer_timeline`:
      - `ENQUIRY_RECEIVED`: Initial lead entry.
-     - `LEAD_QUALIFIED`: Sales phone screening passed.
-     - `SURVEY_BOOKED`: Technician slot assigned.
-     - `SURVEY_SUBMITTED`: Measurements & photos uploaded.
-     - `SURVEY_APPROVED`: Engineering clearance granted.
-     - `QUOTE_GENERATED`: Pricing PDF delivered.
+     - `LEAD_QUALIFIED`: Telephone screening passed.
+     - `SURVEY_REQUESTED`: Survey visit slot requested.
+     - `SURVEY_SUBMITTED`: Field measurements & photos uploaded.
+     - `SURVEY_APPROVED`: Engineering review completed.
+     - `QUOTE_GENERATED`: Quotation prepared and sent.
      - `QUOTE_ACCEPTED`: Customer digital sign-off.
-     - `ORDER_CREATED`: Project handed over to Operations.
+     - `ORDER_CREATED`: Order confirmed and handed over to Operations.
 
-### 3.2 Enquiry Management & Deduplication Subsystem
+### 3.2 Enquiry Ingestion & Deduplication Subsystem
 
 1. **Lead Ingestion Sources:**
-   - `WEB`: Homeowner fills public website enquiry form.
-   - `WHATSAPP`: Sales rep manually logs inbound message.
-   - `PHONE_CALL`: Inbound call logged via quick-intake dialog.
-   - `REFERRAL`: Customer referral with referrer tracking.
-   - `WALK_IN`: Office walk-in visitor.
+   - `WEB`: Homeowner completes public web form.
+   - `WHATSAPP`: Sales rep manually logs WhatsApp inquiry.
+   - `PHONE_CALL`: Inbound customer call logged.
+   - `REFERRAL`: Customer referral.
+   - `WALK_IN`: Office visitor.
 2. **Enquiry Status State Machine:**
    `NEW` ➔ `CONTACTED` ➔ `QUALIFIED` | `DISQUALIFIED` | `MERGED`
-3. **Automated Deduplication Protocol:**
-   - Triggered on every new enquiry submission.
-   - Match criteria:
-     - Exact Phone Number match (`clean_phone(phone)`).
-     - Exact Email match (case-insensitive).
+3. **Automated Duplicate Detection & Merging:**
+   - Detects incoming leads matching existing phone numbers (`clean_phone(phone)`) or email.
    - If match found:
-     - Enquiry created with `status = 'NEW'` and `duplicate_of_id = <original_enquiry_id>`.
+     - Enquiry created with `duplicate_of_id = <original_enquiry_id>`.
      - Alert badge `[DUPLICATE DETECTED]` displayed on Sales Inbox.
-     - Sales representative is presented with a side-by-side field comparison modal:
-       - Option A: Merge into existing customer/enquiry (consolidates notes and updates latest requirements).
-       - Option B: Mark as distinct (e.g., existing customer requesting a solar installation on a second property).
-4. **Preliminary Lead Qualification Gate (BR-SRV-001):**
-   - Before scheduling a costly physical site survey, sales representative conducts a telephone screening:
-     - Shadow-free roof area >= 100 sq ft.
-     - Average monthly electricity bill >= ₹1,500.
-     - Grid connection status: Active connection, stable voltage, phase type (Single Phase / Three Phase).
-   - If verified, `enquiry.status` advances to `QUALIFIED`, and `customer` record is created/linked.
+     - Side-by-side comparison modal allows sales reps to merge into primary record or retain as distinct.
+4. **Preliminary Lead Screening (Verified against Spec):**
+   - The specification states: *"Someone must call them and check the basics: how much shadow-free roof space they have, what their monthly electricity bill is, and whether the grid connection is suitable."*
+   - **Configuration Rule:** Thresholds are configurable in system settings `[NC-013]` and `[NC-014]` (e.g. `[DEMO] shadow_free_area >= 100 sq ft`, `[DEMO] monthly_bill >= ₹1,500`).
+   - If verified, `enquiry.status` advances to `QUALIFIED`, creating/linking a `customer` profile.
 
 ### 3.3 Site Survey & Engineering Approval Subsystem
 
-1. **Survey Scheduling & Slot Assignment:**
-   - Only qualified leads can have surveys scheduled.
-   - Technician workload checked against `users` (role `Technician`) to prevent double-booking.
-   - Survey record created with `status = 'SCHEDULED'`.
-2. **Mobile On-Site Execution Form:**
-   - Used by technician directly on rooftop via mobile/tablet browser:
-     - `roof_area_sqft`: Measured total roof area.
-     - `shadow_free_sqft`: Usable unshaded area.
-     - `roof_type`: `FLAT_RCC`, `SLOPED_METAL_SHEET`, `TILED`, `GROUND_MOUNT`.
-     - `azimuth_degrees`: Compass orientation (0°–360°, optimum ~180° South in India).
-     - `tilt_angle_degrees`: Inclination angle (10°–30° nominal range, validated 0°–90°).
-     - `cable_run_meters`: Physical distance from panels to inverter/distribution box.
-     - `grid_phase`: `SINGLE_PHASE`, `THREE_PHASE`.
-     - `sanctioned_load_kw`: Utility sanctioned capacity from electricity bill.
-     - `transformer_distance_meters`: Proximity to local distribution transformer.
-3. **Cloudinary Mandatory Photo Proofs (REQ-CRM-005 / REQ-PLT-005):**
-   - Minimum 2 mandatory photo slots before submission:
-     1. `ROOF_PANORAMA`: Clear shot of entire rooftop space and sun path.
-     2. `METER_BOARD`: Existing utility energy meter and main distribution breaker.
-     3. `OBSTACLE_SHADOW` *(Optional)*: Nearby trees, parapets, or water tanks.
-     4. `INVERTER_LOCATION` *(Optional)*: Proposed shaded indoor/outdoor inverter wall.
-   - Direct-to-Cloudinary signed upload utilized (`folder = 'surveys'`).
-4. **Engineering Review Gate (BR-SRV-002 / BR-SRV-003):**
+1. **Technician Scheduling Ownership & Integration Boundary:**
+   - **Customer & Sales Scope:** Requests a site survey appointment for a qualified lead (`POST /api/v1/customer-sales/surveys/request`).
+   - **Operations Scope (Member 3):** Owns technician profiles, 15-technician roster, availability, workload balancing, and conflict prevention.
+   - **Integration Contract:** Customer & Sales queries Operations API `GET /api/v1/operations/technicians/availability?date=...&slot=...` to display open slots to the sales rep, and notifies Operations upon survey scheduling.
+2. **On-Site Mobile Survey Form (Technician Execution):**
+   - Directly recorded on rooftop via mobile/tablet browser:
+     - `roof_area_sqft`: Total measured roof space.
+     - `shadow_free_sqft`: Unshaded usable space.
+     - `roof_type`: Flat RCC, Sloped Metal Sheet, Tiled, Ground Mount.
+     - `azimuth_degrees`: Compass orientation (0°–360°).
+     - `tilt_angle_degrees`: Inclination angle (validated 0°–90°; recommended range configurable `[NC-015]`).
+     - `cable_run_meters`: Distance from panels to inverter/meter.
+     - `grid_phase`: Single Phase, Three Phase.
+     - `sanctioned_load_kw`: Utility sanctioned load.
+     - `structural_condition`: Visual assessment of roof strength.
+3. **Cloudinary Photo Proofs:**
+   - Rooftop photos uploaded using Member 1's shared Cloudinary signed-upload interface (`POST /api/v1/media/sign-upload`, `folder = 'surveys'`).
+   - Minimum photo count is configurable `[NC-016]` (e.g. `[DEMO] Minimum 2 photos: Panorama & Meter Board`).
+4. **Mandatory Engineering Review Gate (Explicit Spec Invariant):**
+   - *"Only after the survey is approved should the customer receive a quote."*
    - Reviewer: Sales Manager or Engineering Lead (`Admin/Owner` or `Sales`).
-   - Actions:
-     - **APPROVE:** Sets `site_surveys.status = 'APPROVED'`. Unlocks Quotation Builder.
-     - **REWORK:** Requires mandatory reason (min 10 characters). Sets `status = 'REWORK'`. Automatically re-routes back to technician's active job card. Quotation generation remains strictly locked.
-     - **REJECT:** Feasibility failed (e.g., insufficient structural load bearing, heavy perpetual shading). Sets `status = 'REJECTED'`. Customer notified.
+   - **APPROVE:** Sets `site_surveys.status = 'APPROVED'`. Unlocks Quotation Builder.
+   - **REWORK:** Requires mandatory reason (minimum 10 characters). Sets `status = 'REWORK'`. Re-routes back to technician queue. Quotation creation remains strictly locked.
+   - **REJECT:** Unfeasible site. Sets `status = 'REJECTED'`. Quotation creation remains locked.
 
 ### 3.4 Solar Packages, Automated BOM & Quotation Engine
 
-1. **Standard Packages Catalog (1 kW to 5 kW):**
-   - SunPower Solutions sells standardized configurations by system capacity:
-     - **Capacities:** 1.0 kW, 2.0 kW, 3.0 kW, 4.0 kW, 5.0 kW.
-     - **Types:** `ON_GRID` (Grid-tied net metering, no battery) and `OFF_GRID` (Battery storage bank).
-     - Total: 10 standard package configurations.
-2. **Formulaic Automated BOM Derivation (BR-QTE-001):**
-   - Sales representatives are strictly prohibited from typing component lists from memory. Selecting capacity and grid type derives exact parts:
+1. **Ready Packages Catalog (Verified against Spec):**
+   - Specification explicitly defines:
+     - Capacities: Ready-made systems from 1 kW to 5 kW.
+     - Kinds: `On-Grid` (connected to grid, no battery) and `Off-Grid` (with battery backup).
+     - Standard package hardware: Inverter, wiring boxes, battery charge controller, panels, safety earthing, metal stands, plus large battery for Off-Grid.
+   - Total: 10 standard package configurations (1 kW to 5 kW in On-Grid and Off-Grid).
+2. **Automated Bill of Materials (BOM) Derivation (Explicit Spec Invariant):**
+   - *"The quote should come from a ready template, and the exact list of parts should follow on its own: panels, inverter, stands, switches, wires and safety parts. Nobody should have to remember every small part."*
+   - Selecting package capacity and grid type automatically derives all hardware components.
+   - Panel wattage and component brand specifications are configurable in package templates `[NC-017]` (e.g. `[DEMO] 540W Mono PERC`).
+   - Dynamic cable adjustment: If surveyed cable run exceeds default allocation in template, BOM engine adds extra cable line item automatically.
+3. **Quotation Pricing, Validity & Customer Acceptance:**
+   - `hardware_subtotal`: Sum of all auto-derived BOM components.
+   - `installation_labor_cost`: Configurable installation service charge.
+   - `tax_amount`: Calculated using configurable tax slab `[NC-006]` (`[DEMO] 12.0% Flat GST`).
+   - `subsidy_estimated_amount`: Informational subsidy rebate display `[NC-007]`.
+   - `discount_amount`: Sales discounts capped at configurable threshold `[NC-012]` (`[DEMO] 10% max without Director approval`).
+   - `valid_until`: Strict validity window `[NC-011]` (`[DEMO] 15 Calendar Days`). Expired quotes cannot be accepted without revalidation.
+4. **Customer Digital Acceptance Gate (Verified against Spec):**
+   - Customer accesses branded quote portal via secure cryptographically random token: `/portal/quotes/:token`.
+   - Customer inspects system specs, BOM breakdown, payment schedule, and terms.
+   - **Acceptance:** Customer signs on screen and confirms terms. Quote status transitions to `ACCEPTED`.
+   - **Decline:** Customer submits structured feedback. Status transitions to `DECLINED`.
 
-| Capacity | Grid Type | PV Modules (Mono PERC 540W) | Inverter Specification | Mounting Structures | DC/AC Solar Cable | Safety / Earthing Kit | Battery Bank (Off-Grid Only) |
-|---|---|---|---|---|---|---|---|
-| **1 kW** | ON_GRID | 2x (1.08 kWp) | 1x 1 kW On-Grid String | 1 Set (2-panel rail) | 20 meters 4 sq mm | 1x Dual AC/DC SPD Box + 1 Rod | None |
-| **1 kW** | OFF_GRID| 2x (1.08 kWp) | 1x 1.2 kVA Solar Hybrid| 1 Set (2-panel rail) | 20 meters 4 sq mm | 1x Dual AC/DC SPD Box + 1 Rod | 1x 12V 150Ah Tubular / LiFePO4 |
-| **2 kW** | ON_GRID | 4x (2.16 kWp) | 1x 2 kW On-Grid String | 1 Set (4-panel rail) | 25 meters 4 sq mm | 1x Dual AC/DC SPD Box + 1 Rod | None |
-| **2 kW** | OFF_GRID| 4x (2.16 kWp) | 1x 2.5 kVA Solar Hybrid| 1 Set (4-panel rail) | 25 meters 4 sq mm | 1x Dual AC/DC SPD Box + 1 Rod | 2x 12V 150Ah (24V Bank) |
-| **3 kW** | ON_GRID | 6x (3.24 kWp) | 1x 3.3 kW On-Grid String | 2 Sets (6-panel rails)| 35 meters 6 sq mm | 2x Earthing Rods + Chemical Bag | None |
-| **3 kW** | OFF_GRID| 6x (3.24 kWp) | 1x 3.5 kVA Solar Hybrid| 2 Sets (6-panel rails)| 35 meters 6 sq mm | 2x Earthing Rods + Chemical Bag | 4x 12V 150Ah (48V Bank) |
-| **4 kW** | ON_GRID | 8x (4.32 kWp) | 1x 4.2 kW On-Grid String | 2 Sets (8-panel rails)| 40 meters 6 sq mm | 2x Earthing Rods + Chemical Bag | None |
-| **4 kW** | OFF_GRID| 8x (4.32 kWp) | 1x 5.0 kVA Solar Hybrid| 2 Sets (8-panel rails)| 40 meters 6 sq mm | 2x Earthing Rods + Chemical Bag | 4x 12V 200Ah (48V Bank) |
-| **5 kW** | ON_GRID | 10x (5.40 kWp)| 1x 5.0 kW On-Grid String | 3 Sets (10-panel rails)| 50 meters 6 sq mm | 2x Earthing Rods + Chemical Bag | None |
-| **5 kW** | OFF_GRID| 10x (5.40 kWp)| 1x 6.0 kVA Solar Hybrid| 3 Sets (10-panel rails)| 50 meters 6 sq mm | 2x Earthing Rods + Chemical Bag | 8x 12V 150Ah (48V High-Capacity) |
+### 3.5 Order Initialization & Operations/Finance Handover
 
-3. **Dynamic Survey Adjustments:**
-   - If surveyed cable distance (`cable_run_meters`) exceeds the standard package allocation (e.g. 55m measured vs 35m package default for 3 kW), the BOM engine automatically adds an extra cable line item: `Extra Solar DC Cable: 20 meters @ ₹75/m`.
-4. **Quotation Pricing & Validity Rules:**
-   - `hardware_subtotal`: Sum of all itemized BOM parts.
-   - `installation_labor_cost`: Configured base installation charge.
-   - `tax_amount`: Calculated according to configured tax slab `[NC-006]`.
-   - `subsidy_estimate`: Informational subsidy rebate display `[NC-007]`.
-   - `discount_amount`: Sales rep may grant up to 10% discount. Discounts > 10% require `Admin/Owner` cryptographic sign-off.
-   - `valid_until`: Strict 15-day validity window (BR-QTE-003). Expired quotes cannot be accepted.
-5. **Customer Digital Acceptance Gate (BR-QTE-002):**
-   - Customer receives secure URL: `/portal/quotes/:token`.
-   - Displays branded solar layout, BOM parts list, price breakdown, payment schedule, and terms.
-   - Actions:
-     - **ACCEPT:** Customer enters full legal name, confirms terms, signs digitally on canvas. Transitions quote to `ACCEPTED`, records IP address, timestamp, and signature hash.
-     - **DECLINE:** Customer submits structured decline feedback (e.g., Price too high, Competitor chosen, Financing delayed).
-
-### 3.5 Order Initialization & Operations Handover
-
-1. **Order Creation Enforcement (BR-QTE-002):**
+1. **Order Creation Prerequisite (Explicit Spec Invariant):**
    - An Order and Project **CANNOT** be created from a Draft, Sent, Expired, or Declined quotation.
    - Quotation status must strictly equal `ACCEPTED`.
-2. **Operations Handover Contract:**
-   - Order creation initializes:
-     - `orders` table entry (`status = 'PENDING_ADVANCE'`).
-     - `projects` table entry (`stage = 'SURVEY_COMPLETED_PENDING_PAYMENT'`).
-     - Frozen snapshot of accepted BOM items copied to `project_bom`.
-     - Event emitted for Member 4: Razorpay advance payment order creation.
-     - Handover payload exposed for Member 3: Warehouse inventory reservation and technician crew allocation.
+2. **Advance Payment Workflow (Clarified & Configurable):**
+   - Specification states: *"A customer usually pays an advance, or the full amount, before work starts."*
+   - In accordance with review directives:
+     - Advance payment percentage is **not a hardcoded mandatory gate** unless confirmed.
+     - Stored as configurable `advance_required_percent` in system settings `[NC-001]` (`[DEMO] 25% default`).
+     - Whether payment strictly blocks warehouse dispatch is configurable via `enforce_advance_dispatch_gate` `[NC-002]` (`[DEMO] true`).
+3. **Operations & Finance Handover Contracts (API Boundaries):**
+   - Member 2 does not assume Member 3's or Member 4's internal database tables.
+   - Member 2 exposes and consumes typed external contracts:
+     - **Operations Handover (`POST /api/v1/operations/projects/handover`):** Ingests project order, frozen BOM snapshot, and site survey measurements for warehouse packing and crew scheduling.
+     - **Finance Order Intake (`POST /api/v1/finance/orders/initiate-payment`):** Ingests commercial order totals and customer details for Razorpay advance payment order generation and invoicing.
 
 ---
 
 ## 4. Comprehensive API Specifications
 
-All endpoints are prefixed with: `/api/v1/customer-sales`
+All endpoints are mounted under: `/api/v1/customer-sales`
 
 ### 4.1 Customer Management Endpoints
 
-#### `POST /api/v1/customer-sales/customers`
-- **Description:** Manually create a new customer profile.
-- **Access:** Protected (`Admin/Owner`, `Sales`).
-- **Request Body:**
-  ```json
-  {
-    "fullName": "Rajesh Patel",
-    "phone": "+919876543210",
-    "secondaryPhone": "+919876543211",
-    "email": "rajesh.patel@example.com",
-    "preferredContactChannel": "WHATSAPP",
-    "billingAddress": "Flat 402, Shivalik Residency, Drive-In Road",
-    "siteAddress": "Bungalow 12, Sunrise Park, Bodakdev",
-    "city": "Ahmedabad",
-    "state": "Gujarat",
-    "pincode": "380054",
-    "landmark": "Near Sunrise Lake"
-  }
-  ```
-- **Response `201 Created`:**
-  ```json
-  {
-    "success": true,
-    "message": "Customer created successfully",
-    "data": {
-      "id": "c1f2e3d4-0000-0000-0000-000000000001",
-      "customerCode": "CUST-2026-0041",
-      "fullName": "Rajesh Patel",
-      "phone": "+919876543210",
-      "email": "rajesh.patel@example.com",
-      "city": "Ahmedabad",
-      "state": "Gujarat",
-      "status": "ACTIVE",
-      "createdAt": "2026-10-31T08:00:00.000Z"
-    }
-  }
-  ```
-- **Error Codes:** `400 Bad Request` (Zod validation failed), `409 Conflict` (Phone number already registered).
-
-#### `GET /api/v1/customer-sales/customers`
-- **Description:** Search and filter customer directory.
-- **Access:** Protected (`Admin/Owner`, `Sales`, `Support`).
-- **Query Parameters:** `search`, `city`, `pincode`, `status`, `page`, `limit`.
-- **Response `200 OK`:**
-  ```json
-  {
-    "success": true,
-    "data": [
-      {
-        "id": "c1f2e3d4-0000-0000-0000-000000000001",
-        "customerCode": "CUST-2026-0041",
-        "fullName": "Rajesh Patel",
-        "phone": "+919876543210",
-        "email": "rajesh.patel@example.com",
-        "city": "Ahmedabad",
-        "pincode": "380054",
-        "activeProjectsCount": 1,
-        "createdAt": "2026-10-31T08:00:00.000Z"
-      }
-    ],
-    "pagination": { "page": 1, "limit": 20, "total": 1, "totalPages": 1 }
-  }
-  ```
-
-#### `GET /api/v1/customer-sales/customers/:id`
-- **Description:** Retrieve 360 customer dossier including past enquiries, surveys, quotes, projects, serials, and tickets.
-- **Access:** Protected (`Admin/Owner`, `Sales`, `Support`).
-- **Response `200 OK`:**
-  ```json
-  {
-    "success": true,
-    "data": {
-      "customer": {
-        "id": "c1f2e3d4-0000-0000-0000-000000000001",
-        "customerCode": "CUST-2026-0041",
-        "fullName": "Rajesh Patel",
-        "phone": "+919876543210",
-        "email": "rajesh.patel@example.com",
-        "siteAddress": "Bungalow 12, Sunrise Park, Bodakdev",
-        "city": "Ahmedabad",
-        "state": "Gujarat",
-        "pincode": "380054"
-      },
-      "enquiries": [],
-      "surveys": [],
-      "quotations": [],
-      "projects": [],
-      "installedSerials": [],
-      "serviceTickets": []
-    }
-  }
-  ```
-
-#### `GET /api/v1/customer-sales/customers/:id/timeline`
-- **Description:** Retrieve chronological audit activity history for customer.
-- **Access:** Protected (`Admin/Owner`, `Sales`, `Support`).
-- **Response `200 OK`:**
-  ```json
-  {
-    "success": true,
-    "data": [
-      {
-        "id": "t1-0000-0000-0000-000000000001",
-        "eventType": "ENQUIRY_RECEIVED",
-        "title": "Public Rooftop Enquiry Received",
-        "description": "Customer requested 3 kW On-Grid system under PM Surya Ghar subsidy.",
-        "actorName": "System",
-        "metadata": { "enquiryId": "e1-0000..." },
-        "createdAt": "2026-10-31T08:00:00.000Z"
-      }
-    ]
-  }
-  ```
-
----
+| Method | Endpoint | Access Role | Description |
+|---|---|---|---|
+| `POST` | `/api/v1/customer-sales/customers` | Admin/Owner, Sales | Create customer profile |
+| `GET` | `/api/v1/customer-sales/customers` | Admin/Owner, Sales, Support | Search & filter customer directory |
+| `GET` | `/api/v1/customer-sales/customers/:id` | Admin/Owner, Sales, Support | Retrieve 360 customer dossier |
+| `PUT` | `/api/v1/customer-sales/customers/:id` | Admin/Owner, Sales | Update customer contact & address info |
+| `GET` | `/api/v1/customer-sales/customers/:id/timeline` | Admin/Owner, Sales, Support | Chronological event history |
 
 ### 4.2 Enquiry Management Endpoints
 
-#### `POST /api/v1/customer-sales/public/enquiries`
-- **Description:** Public web enquiry intake for homeowners. Anti-spam rate limited (5 submissions per 15 min per IP).
-- **Access:** **Public** (No JWT required).
-- **Request Body:**
-  ```json
-  {
-    "fullName": "Anil Sharma",
-    "phone": "+919825012345",
-    "email": "anil.sharma@example.com",
-    "address": "15 Green Valley Bungalows",
-    "city": "Vadodara",
-    "pincode": "390001",
-    "monthlyElectricityBill": 3200,
-    "preferredCapacityKw": 3.0,
-    "preferredSystemType": "ON_GRID",
-    "notes": "Interested in central government rooftop subsidy."
-  }
-  ```
-- **Response `201 Created`:**
-  ```json
-  {
-    "success": true,
-    "message": "Enquiry submitted successfully. A solar advisor will call you within 24 hours.",
-    "data": {
-      "enquiryId": "e1f2a3b4-0000-0000-0000-000000000001",
-      "referenceNumber": "ENQ-2026-0089",
-      "status": "NEW"
-    }
-  }
-  ```
-- **Error Codes:** `429 Too Many Requests`, `400 Bad Request` (Invalid phone, bill <= 0).
-
-#### `GET /api/v1/customer-sales/enquiries`
-- **Description:** Sales representative lead queue with status filter and duplicate flags.
-- **Access:** Protected (`Admin/Owner`, `Sales`).
-- **Query Parameters:** `status` (`NEW`, `CONTACTED`, `QUALIFIED`, `DISQUALIFIED`, `MERGED`), `isDuplicate`, `search`, `assignedTo`.
-- **Response `200 OK`:** Returns array of enquiries with duplicate references and assigned sales agent.
-
-#### `PATCH /api/v1/customer-sales/enquiries/:id/assign`
-- **Description:** Assign lead to a specific sales executive.
-- **Access:** Protected (`Admin/Owner`, `Sales`).
-- **Request Body:** `{ "assignedUserId": "u1-0000-0000-0000-000000000001" }`
-- **Response `200 OK`:** `{ "success": true, "message": "Enquiry assigned successfully" }`
-
-#### `POST /api/v1/customer-sales/enquiries/:id/qualify`
-- **Description:** Record telephone screening qualification checklist. Automatically creates a linked customer record if none exists.
-- **Access:** Protected (`Admin/Owner`, `Sales`).
-- **Request Body:**
-  ```json
-  {
-    "shadowFreeRoofSpaceSqFt": 250,
-    "monthlyElectricityBill": 3200,
-    "gridConnectionStable": true,
-    "gridPhase": "SINGLE_PHASE",
-    "qualificationDecision": "PASSED",
-    "qualificationNotes": "RCC terrace with zero shading. Bill verified. Good candidate for 3 kW."
-  }
-  ```
-- **Response `200 OK`:** Returns `{ "enquiryStatus": "QUALIFIED", "customerId": "c1f2e3d4-..." }`.
-- **Business Rule:** Fails with `400 Bad Request` if `shadowFreeRoofSpaceSqFt < 100` or `monthlyElectricityBill < 1500` without manager override note.
-
-#### `POST /api/v1/customer-sales/enquiries/:id/merge`
-- **Description:** Merge duplicate enquiry into a primary enquiry/customer record.
-- **Access:** Protected (`Admin/Owner`, `Sales`).
-- **Request Body:**
-  ```json
-  {
-    "primaryEnquiryId": "e1-0000-0000-0000-000000000001",
-    "mergeNotes": "Customer called again with same mobile number regarding commercial shed."
-  }
-  ```
-- **Response `200 OK`:** Sets secondary enquiry `status = 'MERGED'` and updates primary record notes.
-
----
+| Method | Endpoint | Access Role | Description |
+|---|---|---|---|
+| `POST` | `/api/v1/customer-sales/public/enquiries` | **Public** (Rate-limited) | Public web inquiry form intake |
+| `GET` | `/api/v1/customer-sales/enquiries` | Admin/Owner, Sales | Sales lead queue with duplicate alerts |
+| `GET` | `/api/v1/customer-sales/enquiries/:id` | Admin/Owner, Sales | Detailed enquiry view |
+| `PATCH` | `/api/v1/customer-sales/enquiries/:id/assign` | Admin/Owner, Sales | Assign enquiry to sales representative |
+| `POST` | `/api/v1/customer-sales/enquiries/:id/qualify` | Admin/Owner, Sales | Record telephone preliminary check |
+| `GET` | `/api/v1/customer-sales/enquiries/duplicates` | Admin/Owner, Sales | List detected duplicate leads |
+| `POST` | `/api/v1/customer-sales/enquiries/:id/merge` | Admin/Owner, Sales | Merge duplicate lead into primary record |
 
 ### 4.3 Site Survey Endpoints
 
-#### `POST /api/v1/customer-sales/surveys/schedule`
-- **Description:** Schedule on-site physical survey and assign field technician.
-- **Access:** Protected (`Admin/Owner`, `Sales`).
-- **Business Rule (BR-SRV-001):** Lead must be in `QUALIFIED` status. Technician double-booking in chosen window returns `409 Conflict`.
-- **Request Body:**
-  ```json
-  {
-    "customerId": "c1f2e3d4-0000-0000-0000-000000000001",
-    "enquiryId": "e1f2a3b4-0000-0000-0000-000000000001",
-    "technicianId": "u2-0000-0000-0000-000000000002",
-    "scheduledDate": "2026-11-03",
-    "timeSlot": "10:00-12:00",
-    "siteContactName": "Rajesh Patel",
-    "siteContactPhone": "+919876543210",
-    "schedulingNotes": "Customer prefers morning visit before office."
-  }
-  ```
-- **Response `201 Created`:** Survey created in `SCHEDULED` status.
-
-#### `POST /api/v1/customer-sales/surveys/:id/execute`
-- **Description:** Technician submits rooftop measurements from mobile device.
-- **Access:** Protected (`Technician`, `Admin/Owner`).
-- **Request Body:**
-  ```json
-  {
-    "roofAreaSqFt": 450,
-    "shadowFreeSqFt": 350,
-    "roofType": "FLAT_RCC",
-    "azimuthDegrees": 180,
-    "tiltAngleDegrees": 22,
-    "cableRunMeters": 32,
-    "gridPhase": "SINGLE_PHASE",
-    "sanctionedLoadKw": 4.0,
-    "transformerDistanceMeters": 45,
-    "structuralCondition": "GOOD",
-    "technicianNotes": "Parapet height is 3 ft. Sufficient anchor points for standard South-facing stands."
-  }
-  ```
-- **Response `200 OK`:** Survey updated with measurements; status transitions to `SUBMITTED`.
-
-#### `POST /api/v1/customer-sales/surveys/:id/photos`
-- **Description:** Attach Cloudinary photo references to survey.
-- **Access:** Protected (`Technician`, `Admin/Owner`).
-- **Request Body:**
-  ```json
-  {
-    "photos": [
-      {
-        "photoType": "ROOF_PANORAMA",
-        "cloudinaryUrl": "https://res.cloudinary.com/sunpower/image/upload/v1730370000/surveys/roof_pano_01.jpg",
-        "caption": "Full view of terrace facing South"
-      },
-      {
-        "photoType": "METER_BOARD",
-        "cloudinaryUrl": "https://res.cloudinary.com/sunpower/image/upload/v1730370000/surveys/meter_board_01.jpg",
-        "caption": "Existing 1-phase digital meter board"
-      }
-    ]
-  }
-  ```
-- **Business Rule:** Survey requires minimum 2 verified photo records.
-
-#### `POST /api/v1/customer-sales/surveys/:id/approve`
-- **Description:** Engineering review sign-off. Unlocks quotation creation.
-- **Access:** Protected (`Admin/Owner`, `Sales`).
-- **Request Body:** `{ "reviewNotes": "Structural and shadow clearance approved for 3 kW On-Grid." }`
-- **Response `200 OK`:** `status = 'APPROVED'`. Emits audit log.
-
-#### `POST /api/v1/customer-sales/surveys/:id/rework`
-- **Description:** Engineering requests technician rework.
-- **Access:** Protected (`Admin/Owner`, `Sales`).
-- **Request Body:** `{ "reworkReason": "Cable path to ground floor meter board is unclear. Re-measure path avoiding lift room." }`
-- **Business Rule (BR-SRV-003):** `reworkReason` must have `>= 10` characters. `status = 'REWORK'`.
-
-#### `POST /api/v1/customer-sales/surveys/:id/reject`
-- **Description:** Reject survey due to insurmountable site limitations.
-- **Access:** Protected (`Admin/Owner`, `Sales`).
-- **Request Body:** `{ "rejectionReason": "Terrace has heavy tree shade on South and West; structural slab damaged." }`
-- **Response `200 OK`:** `status = 'REJECTED'`.
-
----
+| Method | Endpoint | Access Role | Description |
+|---|---|---|---|
+| `POST` | `/api/v1/customer-sales/surveys/request` | Admin/Owner, Sales | Request survey visit (queries Ops for slots) |
+| `GET` | `/api/v1/customer-sales/surveys` | Admin/Owner, Sales, Tech | List survey appointments |
+| `GET` | `/api/v1/customer-sales/surveys/:id` | Admin/Owner, Sales, Tech | Detailed survey record & measurements |
+| `POST` | `/api/v1/customer-sales/surveys/:id/execute` | Technician, Admin/Owner | Mobile survey measurement submission |
+| `POST` | `/api/v1/customer-sales/surveys/:id/photos` | Technician, Admin/Owner | Attach Cloudinary photo proofs |
+| `POST` | `/api/v1/customer-sales/surveys/:id/approve` | Admin/Owner, Sales | **Engineering sign-off gate (Unlocks quotes)** |
+| `POST` | `/api/v1/customer-sales/surveys/:id/rework` | Admin/Owner, Sales | Request technician rework (min 10 char reason) |
+| `POST` | `/api/v1/customer-sales/surveys/:id/reject` | Admin/Owner, Sales | Reject unfeasible site |
 
 ### 4.4 Packages & Automated BOM Endpoints
 
-#### `GET /api/v1/customer-sales/packages`
-- **Description:** Retrieve standard solar package catalog (1 kW to 5 kW On/Off Grid).
-- **Access:** Protected (`Admin/Owner`, `Sales`, `Technician`, `Support`).
-- **Response `200 OK`:** Returns all 10 configurations with base pricing, hardware templates, and inverter ratings.
-
-#### `POST /api/v1/customer-sales/quotations/generate-bom`
-- **Description:** Calculate full parts list automatically from package capacity and survey cable length.
-- **Access:** Protected (`Admin/Owner`, `Sales`).
-- **Request Body:**
-  ```json
-  {
-    "packageId": "pkg-3kw-ongrid-uuid",
-    "surveyId": "srv-0000-0000-0000-000000000001",
-    "customizations": []
-  }
-  ```
-- **Response `200 OK`:**
-  ```json
-  {
-    "success": true,
-    "data": {
-      "package": { "name": "3 kW On-Grid Solar System", "capacityKw": 3.0, "gridType": "ON_GRID" },
-      "items": [
-        { "category": "SOLAR_PANEL", "name": "540W Mono PERC Solar Panel", "sku": "PNL-540W", "quantity": 6, "unit": "NOS", "unitPrice": 12500, "totalPrice": 75000 },
-        { "category": "INVERTER", "name": "3.3 kW On-Grid String Inverter", "sku": "INV-3.3KW-ON", "quantity": 1, "unit": "NOS", "unitPrice": 38000, "totalPrice": 38000 },
-        { "category": "STRUCTURE", "name": "Galvanized Iron Module Mounting Structure (2-row)", "sku": "STR-3KW-GI", "quantity": 2, "unit": "SET", "unitPrice": 7500, "totalPrice": 15000 },
-        { "category": "CABLE", "name": "4 sq mm Solar DC Copper Flexible Cable (Red/Black)", "sku": "CBL-4MM-DC", "quantity": 35, "unit": "METER", "unitPrice": 75, "totalPrice": 2625 },
-        { "category": "ELECTRICAL", "name": "Dual Array AC/DC Distribution Box with SPD & MCB", "sku": "DB-ACDC-3KW", "quantity": 1, "unit": "NOS", "unitPrice": 6500, "totalPrice": 6500 },
-        { "category": "SAFETY", "name": "Chemical Earthing Rod (17.2mm x 2m) with Compound Bag", "sku": "EARTH-ROD-CHEM", "quantity": 2, "unit": "SET", "unitPrice": 3200, "totalPrice": 6400 }
-      ],
-      "hardwareSubtotal": 143525
-    }
-  }
-  ```
-
----
+| Method | Endpoint | Access Role | Description |
+|---|---|---|---|
+| `GET` | `/api/v1/customer-sales/packages` | Authenticated | 1-5 kW standard solar package catalog |
+| `GET` | `/api/v1/customer-sales/packages/:id` | Authenticated | Package template and standard hardware spec |
+| `POST` | `/api/v1/customer-sales/quotations/generate-bom` | Admin/Owner, Sales | Auto-derive BOM from package & survey cable |
 
 ### 4.5 Quotation Management Endpoints
 
-#### `POST /api/v1/customer-sales/quotations`
-- **Description:** Construct and save a quotation based on an approved site survey.
-- **Access:** Protected (`Admin/Owner`, `Sales`).
-- **Business Rule (BR-SRV-002):** Survey must be in `APPROVED` status. Disallowing quotes on draft/pending surveys with `403 Forbidden`.
-- **Request Body:**
-  ```json
-  {
-    "customerId": "c1f2e3d4-0000-0000-0000-000000000001",
-    "surveyId": "srv-0000-0000-0000-000000000001",
-    "packageId": "pkg-3kw-ongrid-uuid",
-    "installationLaborCost": 15000,
-    "discountAmount": 5000,
-    "taxRatePercent": 12.0,
-    "subsidyEstimatedAmount": 78000,
-    "validityDays": 15,
-    "notes": "Includes PM Surya Ghar subsidy assistance and net-metering liaisoning."
-  }
-  ```
-- **Response `201 Created`:**
-  ```json
-  {
-    "success": true,
-    "data": {
-      "id": "q1-0000-0000-0000-000000000001",
-      "quotationNumber": "QTE-2026-0104",
-      "version": 1,
-      "status": "DRAFT",
-      "hardwareSubtotal": 143525,
-      "installationLaborCost": 15000,
-      "discountAmount": 5000,
-      "taxableAmount": 153525,
-      "taxAmount": 18423,
-      "grandTotal": 171948,
-      "subsidyEstimatedAmount": 78000,
-      "netCustomerPayable": 93948,
-      "validUntil": "2026-11-15T23:59:59.000Z",
-      "publicToken": "sec_tok_9b2d8f7e6a5c4b3a2f1e"
-    }
-  }
-  ```
+| Method | Endpoint | Access Role | Description |
+|---|---|---|---|
+| `POST` | `/api/v1/customer-sales/quotations` | Admin/Owner, Sales | Create quote (**Requires approved survey**) |
+| `GET` | `/api/v1/customer-sales/quotations` | Admin/Owner, Sales | Filterable quotation list |
+| `GET` | `/api/v1/customer-sales/quotations/:id` | Admin/Owner, Sales | Detailed quotation view with BOM lines |
+| `POST` | `/api/v1/customer-sales/quotations/:id/send` | Admin/Owner, Sales | Deliver quote link/PDF to customer |
+| `GET` | `/api/v1/customer-sales/public/quotations/:token` | **Public** (Token-secured) | Customer quote portal viewer |
+| `POST` | `/api/v1/customer-sales/public/quotations/:token/accept` | **Public** (Token-secured) | Accept quotation & digital sign-off |
+| `POST` | `/api/v1/customer-sales/public/quotations/:token/decline`| **Public** (Token-secured) | Decline quotation with feedback |
 
-#### `POST /api/v1/customer-sales/quotations/:id/send`
-- **Description:** Finalize draft and send quotation link/PDF to customer.
-- **Access:** Protected (`Admin/Owner`, `Sales`).
-- **Response `200 OK`:** Sets `quotations.status = 'SENT'`.
+### 4.6 Order Initialization & Handover Endpoints
 
-#### `GET /api/v1/customer-sales/public/quotations/:token`
-- **Description:** Customer portal quote viewer accessed via cryptographically random token.
-- **Access:** **Public** (token-secured).
-- **Business Rule:** Non-confidential customer view. Strips cost prices and margins.
-
-#### `POST /api/v1/customer-sales/public/quotations/:token/accept`
-- **Description:** Customer accepts quotation and digitally signs on screen.
-- **Access:** **Public** (token-secured).
-- **Business Rule (BR-QTE-002 / BR-QTE-003):** Quote must not be expired. Advances quote to `ACCEPTED` and automatically triggers Order/Project Creation.
-- **Request Body:**
-  ```json
-  {
-    "acceptedByName": "Rajesh Patel",
-    "acceptedByPhone": "+919876543210",
-    "termsAccepted": true,
-    "signatureDataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",
-    "comments": "Please prioritize installation before Diwali."
-  }
-  ```
-- **Response `200 OK`:**
-  ```json
-  {
-    "success": true,
-    "message": "Quotation accepted successfully. Sales Order and Project have been initialized.",
-    "data": {
-      "quotationId": "q1-0000-0000-0000-000000000001",
-      "status": "ACCEPTED",
-      "orderId": "ord-2026-0032",
-      "projectCode": "PRJ-2026-0032"
-    }
-  }
-  ```
-
-#### `POST /api/v1/customer-sales/public/quotations/:token/decline`
-- **Description:** Customer declines quotation.
-- **Access:** **Public** (token-secured).
-- **Request Body:**
-  ```json
-  {
-    "declineReason": "PRICE_TOO_HIGH",
-    "feedback": "Budget currently limited to ₹1,20,000."
-  }
-  ```
-- **Response `200 OK`:** Sets `status = 'DECLINED'`.
+| Method | Endpoint | Access Role | Description |
+|---|---|---|---|
+| `POST` | `/api/v1/customer-sales/orders/create-from-quote` | Admin/Owner, Sales | Create order (**Requires accepted quote**) |
+| `GET` | `/api/v1/customer-sales/orders/:id` | Admin/Owner, Sales | Sales order overview |
+| `GET` | `/api/v1/customer-sales/handover/:orderId` | Admin/Owner, Sales, Ops | Handover payload consumed by Operations |
 
 ---
 
-### 4.6 Order Creation & Handover Endpoints
+## 5. Database Architecture (`101_customer_sales.sql`)
 
-#### `POST /api/v1/customer-sales/orders/create-from-quote`
-- **Description:** Explicit API trigger to initialize order from accepted quote (if not auto-spawned).
-- **Access:** Protected (`Admin/Owner`, `Sales`).
-- **Business Rule:** Fails with `400 Bad Request` if quote status != `ACCEPTED`.
-
-#### `GET /api/v1/customer-sales/handover/:orderId`
-- **Description:** Typed integration handover query consumed by Member 3 (Operations) and Member 4 (Finance).
-- **Access:** Protected (`Admin/Owner`, `Sales`, `Warehouse`, `Support`).
-- **Response `200 OK`:** Returns structured handover payload (see Section 6.2).
-
----
-
-## 5. Proposed Database Architecture (`101_customer_sales.sql`)
+The migration defines 14 partitioned tables owned exclusively by Member 2. All constraints reflect verified business rules, and non-confirmed thresholds are validated via configurable application logic:
 
 ```sql
 -- ==============================================================================
@@ -706,7 +328,7 @@ CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
 CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);
 CREATE INDEX IF NOT EXISTS idx_customers_pincode ON customers(pincode);
 
--- 3. CUSTOMER TIMELINE TABLE (Append-Only Event Ledger)
+-- 3. CUSTOMER TIMELINE TABLE
 CREATE TABLE IF NOT EXISTS customer_timeline (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -776,7 +398,6 @@ CREATE TABLE IF NOT EXISTS site_surveys (
 CREATE INDEX IF NOT EXISTS idx_site_surveys_cust_id ON site_surveys(customer_id);
 CREATE INDEX IF NOT EXISTS idx_site_surveys_tech_id ON site_surveys(technician_id);
 CREATE INDEX IF NOT EXISTS idx_site_surveys_status ON site_surveys(status);
-CREATE INDEX IF NOT EXISTS idx_site_surveys_scheduled_date ON site_surveys(scheduled_date);
 
 -- 6. SURVEY MEASUREMENTS TABLE
 CREATE TABLE IF NOT EXISTS survey_measurements (
@@ -800,7 +421,7 @@ CREATE TABLE IF NOT EXISTS survey_measurements (
 CREATE TABLE IF NOT EXISTS survey_photos (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     survey_id UUID NOT NULL REFERENCES site_surveys(id) ON DELETE CASCADE,
-    photo_type VARCHAR(50) NOT NULL CHECK (photo_type IN ('ROOF_PANORAMA', 'METER_BOARD', 'OBSTACLE_SHADOW', 'INVERTER_LOCATION', 'OTHER')),
+    photo_type VARCHAR(50) NOT NULL,
     cloudinary_url TEXT NOT NULL,
     caption VARCHAR(255),
     uploaded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -940,68 +561,62 @@ CREATE INDEX IF NOT EXISTS idx_projects_stage ON projects(current_stage);
 
 ---
 
-## 6. Module Integration Interfaces
+## 6. Integration Contracts & Cross-Member Boundaries
 
-### 6.1 Consumption of Member 1 (Platform Foundation) Primitives
+### 6.1 Integration with Member 1 (Platform Foundation)
+- **Database Access:** Import shared singleton `db` pool (`server/src/db/index.js`).
+- **Authentication:** Use `authenticate` middleware to secure endpoints and populate `req.user`.
+- **Authorization:** Use `authorize('Admin/Owner', 'Sales')` and `requirePermission`.
+- **Validation:** Use `validate(zodSchema)` middleware before controllers.
+- **Audit Logging:** Invoke `recordAuditLog({ userId, action, entity, entityId, oldValues, newValues, ipAddress, userAgent })`.
+- **Cloudinary:** Frontend calls `/api/v1/media/sign-upload` with `folder = 'surveys'`; returns CDN URL stored in `survey_photos`.
 
-1. **Database Access:**
-   ```javascript
-   import { db } from '../../db/index.js';
-   const result = await db.query('SELECT * FROM customers WHERE id = $1', [customerId]);
-   ```
-2. **Authentication & RBAC:**
-   ```javascript
-   import { authenticate } from '../../middleware/auth.middleware.js';
-   import { authorize, requirePermission } from '../../middleware/rbac.middleware.js';
-   router.post('/customers', authenticate, authorize('Admin/Owner', 'Sales'), customerController.create);
-   ```
-3. **Payload Validation:**
-   ```javascript
-   import { validate } from '../../middleware/validate.middleware.js';
-   router.post('/surveys/schedule', validate(scheduleSurveySchema), surveyController.schedule);
-   ```
-4. **Audit Logging Engine:**
-   ```javascript
-   import { recordAuditLog } from '../../shared/utils/auditLogger.js';
-   await recordAuditLog({
-     userId: req.user.id,
-     action: 'SURVEY_APPROVED',
-     entity: 'SITE_SURVEY',
-     entityId: survey.id,
-     newValues: { status: 'APPROVED', reviewerNotes },
-     ipAddress: req.ip,
-     userAgent: req.headers['user-agent']
-   });
-   ```
-5. **Standardized Responses & Custom Errors:**
-   ```javascript
-   import { successResponse } from '../../shared/utils/response.js';
-   import { BadRequestError, ForbiddenError, NotFoundError } from '../../shared/errors/AppError.js';
-   ```
-6. **Cloudinary Signed Media Uploads:**
-   - Frontend invokes `POST /api/v1/media/sign-upload` with `{ "folder": "surveys" }`.
-   - Resulting CDN secure URL is stored in `survey_photos.cloudinary_url`.
+### 6.2 Integration with Member 3 (Operations & Fulfilment)
 
-### 6.2 Handover Contract to Member 3 (Operations & Fulfilment)
+#### A. Technician Availability & Survey Scheduling Interface
+- **Responsibility:** Operations owns technician profiles, roster, workload, and conflict checking.
+- **Dependency Contract:**
+  ```text
+  GET /api/v1/operations/technicians/availability?date=YYYY-MM-DD&slot=SLOT_NAME
+  ```
+- **Response Shape from Member 3:**
+  ```json
+  {
+    "success": true,
+    "data": [
+      {
+        "technicianId": "u2-0000-0000-0000-000000000002",
+        "fullName": "Kiran Rathod",
+        "isAvailable": true,
+        "currentDailyLoad": 1
+      }
+    ]
+  }
+  ```
+- **Fallback during local testing:** Customer & Sales module filters `users` with `role = 'Technician'` if Operations API is temporarily unmounted.
 
-When an accepted quotation initializes an Order and Project, Member 2 provides the following typed payload to Member 3's service interface:
-
+#### B. Project Handover Interface
+When a quotation is accepted and order created, Member 2 dispatches the handover contract to Member 3:
+```text
+POST /api/v1/operations/projects/handover
+```
+**Typed Handover Payload:**
 ```typescript
-interface ProjectHandoverContract {
-  orderId: string;             // UUID v4
-  orderNumber: string;         // 'ORD-2026-0032'
-  projectId: string;           // UUID v4
-  projectCode: string;         // 'PRJ-2026-0032'
+interface OperationsHandoverPayload {
+  orderId: string;
+  orderNumber: string;
+  projectId: string;
+  projectCode: string;
   customerId: string;
   customerName: string;
   customerPhone: string;
-  installationAddress: string;
+  siteAddress: string;
   city: string;
   pincode: string;
   systemSpecification: {
-    capacityKw: number;        // e.g. 3.0
+    capacityKw: number;              // 1.0 to 5.0 kW
     gridType: 'ON_GRID' | 'OFF_GRID';
-    packageCode: string;       // 'PKG-3KW-ON'
+    packageCode: string;             // e.g. 'PKG-3KW-ON'
   };
   surveyParameters: {
     surveyId: string;
@@ -1013,15 +628,15 @@ interface ProjectHandoverContract {
     surveyPhotoUrls: string[];
   };
   billOfMaterials: Array<{
-    category: string;          // 'SOLAR_PANEL' | 'INVERTER' | 'BATTERY' | 'STRUCTURE' | 'CABLE' | 'ELECTRICAL'
-    sku: string;               // e.g. 'PNL-540W'
+    category: string;                // 'SOLAR_PANEL' | 'INVERTER' | 'BATTERY' | 'STRUCTURE' | 'CABLE' | 'ELECTRICAL'
+    sku: string;
     name: string;
     quantity: number;
     unit: string;
   }>;
   financialStatus: {
     totalContractValue: number;
-    advanceRequiredPercent: number; // 25.0
+    advanceRequiredPercent: number;  // Configurable [NC-001]
     advanceRequiredAmount: number;
     paymentStatus: 'PENDING_ADVANCE';
   };
@@ -1029,29 +644,60 @@ interface ProjectHandoverContract {
 }
 ```
 
+### 6.3 Integration with Member 4 (Support, Finance & AI)
+
+#### A. Advance Payment & Invoice Initiation Interface
+When an order is created, Customer & Sales invokes Member 4's Finance API:
+```text
+POST /api/v1/finance/orders/initiate-payment
+```
+**Typed Finance Payload:**
+```typescript
+interface FinanceOrderIntakePayload {
+  orderId: string;
+  orderNumber: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  totalContractValue: number;
+  advanceRequiredPercent: number;    // Configurable [NC-001]
+  advanceRequiredAmount: number;
+  taxAmount: number;
+  taxRatePercent: number;
+  subsidyEstimatedAmount: number;
+}
+```
+
+#### B. Customer 360 Dossier Query Interface
+Member 4 (Support) and Member 3 (Operations) can query the consolidated customer history:
+```text
+GET /api/v1/customer-sales/customers/:id
+```
+Returns profile, enquiries, surveys, quotes, and active orders.
+
 ---
 
-## 7. Role-Based Permission Matrix for Customer & Sales
+## 7. Role-Based Permissions Matrix
 
-| Endpoint / Action | Public | Admin/Owner | Sales | Technician | Warehouse | Support |
+| Endpoint / Operation | Public | Admin/Owner | Sales | Technician | Warehouse | Support |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `POST /public/enquiries` (Web intake) | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| `GET /enquiries` (Lead queue) | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| `POST /public/enquiries` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| `GET /enquiries` | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | `PATCH /enquiries/:id/assign` | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | `POST /enquiries/:id/qualify` | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | `POST /enquiries/:id/merge` | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | `GET /customers` | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ |
 | `POST /customers` | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| `GET /customers/:id` (360 Dossier) | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ |
-| `POST /surveys/schedule` | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| `GET /customers/:id` | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ |
+| `POST /surveys/request` | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | `POST /surveys/:id/execute` (Mobile) | ❌ | ✅ | ❌ | ✅ | ❌ | ❌ |
 | `POST /surveys/:id/photos` | ❌ | ✅ | ❌ | ✅ | ❌ | ❌ |
-| `POST /surveys/:id/approve` | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| `POST /surveys/:id/approve` (Review Gate) | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | `POST /surveys/:id/rework` | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | `POST /surveys/:id/reject` | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | `GET /packages` | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `POST /quotations/generate-bom` | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| `POST /quotations` (Create quote) | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| `POST /quotations` (Create Quote) | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | `POST /quotations/:id/send` | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | `GET /public/quotations/:token` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | `POST /public/quotations/:token/accept` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
@@ -1063,48 +709,49 @@ interface ProjectHandoverContract {
 
 ## 8. Needs Confirmation [NC] Items Register
 
-All unconfirmed business policies are cataloged below with recommended defaults and explicit `[DEMO]` values:
+To prevent hardcoded assumptions, every unconfirmed business policy is cataloged with an explicit `[NC]` tag, configurable treatment, and marked `[DEMO]` value:
 
-| Item ID | Parameter Description | Specification Reference | Configurable Architectural Treatment | DEMO Default Value |
+| Item ID | Parameter Description | Specification Reference | Configurable Architectural Treatment | Marked [DEMO] Value |
 |---|---|---|---|---|
-| **[NC-001]** | **Advance Payment Percentage** | Section 3: *"A customer usually pays an advance, or the full amount, before work starts."* | Stored in quotation record (`advance_required_percent`). Can be overridden per quote by Sales Manager. | **`[DEMO] 25% Advance Payment`** |
-| **[NC-002]** | **Payment Gates & Milestone Enforcement** | Section 3: Dispatch occurs after payment; month-end checks. | Order payment milestone status: `PENDING_ADVANCE` blocks packing/dispatch. | **`[DEMO] 25% Pre-Dispatch + 75% Handover Sign-off`** |
-| **[NC-006]** | **Tax & GST Configuration** | Section 3: Invoices to send; GST rates. | Quotation tax engine with configurable tax percentage. | **`[DEMO] Flat 12.0% GST (CGST 6% + SGST 6%)`** |
-| **[NC-007]** | **Rooftop Subsidy Eligibility & Value** | Section 3: *"under the subsidy"*. | Package-level informational subsidy estimation. | **`[DEMO] PM Surya Ghar Scheme: 1kW=₹30k, 2kW=₹60k, 3kW-5kW=₹78k`** |
-| **[NC-011]** | **Quotation Validity Window** | Industry practice; material price fluctuations. | Field `validity_days` in quotation generator. | **`[DEMO] 15 Calendar Days`** |
-| **[NC-012]** | **Maximum Sales Rep Discount Cap** | Commercial margin protection. | Max allowable discount before requiring `Admin/Owner` authorization. | **`[DEMO] 10.0% Max Rep Discount`** |
+| **[NC-001]** | **Advance Payment Percentage** | Section 3: *"A customer usually pays an advance, or the full amount, before work starts."* | Stored as configurable `advance_required_percent` in system settings; overrideable per quotation. | **`[DEMO] 25.0% Advance`** (with 100% full-pay toggle) |
+| **[NC-002]** | **Advance Payment Gate Policy** | Section 3: Dispatch occurs after payment; month-end checks. | Configurable system flag `enforce_advance_dispatch_gate`. Not enforced as hard DDL constraint. | **`[DEMO] true (Advance required before dispatch)`** |
+| **[NC-006]** | **Tax & GST Configuration** | Section 3: *"There are also invoices to send"*. | Configurable `tax_rate_percent` in quotation generator. | **`[DEMO] 12.0% Flat GST`** |
+| **[NC-007]** | **Rooftop Subsidy Eligibility & Value** | Section 3: *"asking for a 3 kW system under the subsidy"*. | Informational subsidy estimation table linked to package capacity. | **`[DEMO] PM Surya Ghar: 1kW=₹30k, 2kW=₹60k, 3kW-5kW=₹78k`** |
+| **[NC-011]** | **Quotation Validity Window** | Commercial volatility of solar panel pricing. | Configurable `validity_days` in quote generator. | **`[DEMO] 15 Calendar Days`** |
+| **[NC-012]** | **Max Sales Representative Discount** | Profit margin protection. | Configurable `max_rep_discount_percent` before requiring Admin sign-off. | **`[DEMO] 10.0% Max Rep Discount`** |
+| **[NC-013]** | **Preliminary Bill Qualification Threshold** | Section 3: *"check the basics: what their monthly electricity bill is"*. | Configurable `min_monthly_electricity_bill` in screening rules. | **`[DEMO] ₹1,500 / month`** |
+| **[NC-014]** | **Preliminary Shadow-Free Roof Space Threshold** | Section 3: *"check the basics: how much shadow-free roof space they have"*. | Configurable `min_shadow_free_roof_sqft` in screening rules. | **`[DEMO] 100 sq ft`** |
+| **[NC-015]** | **Survey Roof Tilt Angle Nominal Range** | Section 3: *"measure the roof direction, tilt and cable distance"*. | Configurable advisory range in survey validation schema. Hard limit: 0°–90°. | **`[DEMO] 10° to 30° Nominal Range`** |
+| **[NC-016]** | **Minimum Mandatory Survey Photo Count** | Section 3: Survey execution requires photos. | Configurable `min_survey_photo_count` in survey submission schema. | **`[DEMO] Minimum 2 Photos (Panorama & Meter)`** |
+| **[NC-017]** | **Default PV Panel Wattage & Model** | Section 2: Ready-made packages 1 kW to 5 kW. | Configurable in `package_components` template table. | **`[DEMO] 540W Mono PERC Solar Panels`** |
+| **[NC-018]** | **Survey Review SLA Duration** | Section 3: Engineering review gate. | Configurable `survey_review_sla_hours` for manager dashboard alerts. | **`[DEMO] 24 Hours SLA`** |
 
 ---
 
-## 9. Testing & Quality Assurance Plan
+## 9. Validation & Testing Strategy
 
-Every requirement in this contract maps to executable unit, integration, and security tests:
-
-1. **Unit Tests (`server/test/customer-sales/`):**
-   - `deduplication.test.js`: Phone formatting, duplicate matching on phone/email, merge conflict resolution.
-   - `bomGenerator.test.js`: Derives exact parts for 1 kW to 5 kW On/Off Grid; adds extra cable when survey length exceeds package standard.
-   - `quotationMath.test.js`: Tax calculation, subtotal, discount cap verification, net payable calculation.
-2. **API Integration Tests (`server/test/customer-sales/api.test.js`):**
-   - **BR-SRV-001:** Attempting to schedule a survey for an unqualified enquiry returns `400 Bad Request`.
-   - **BR-SRV-002:** Attempting to generate a quotation for a survey with status `SCHEDULED`, `SUBMITTED`, or `REWORK` returns `403 Forbidden`.
-   - **BR-SRV-003:** Marking survey as `REWORK` with reason `< 10` characters returns `400 Bad Request`.
-   - **BR-QTE-002:** Attempting to create an order from a `DRAFT` or `SENT` quotation returns `400 Bad Request`.
-   - **BR-QTE-003:** Customer accepting an expired quotation returns `400 Bad Request (QUOTE_EXPIRED)`.
-   - **Happy Path:** Public enquiry ➔ Qualify ➔ Schedule survey ➔ Execute survey with photos ➔ Approve survey ➔ Generate quote with BOM ➔ Accept quote ➔ Order created.
-3. **Security & Authorization Tests:**
-   - Unauthenticated access to protected routes returns `401 Unauthorized`.
-   - Field Technician trying to approve a survey returns `403 Forbidden`.
-   - Warehouse user trying to view profit margins or generate quotes returns `403 Forbidden`.
+1. **Unit Tests (`server/test/customer-sales/unit/`):**
+   - Deduplication algorithm: phone sanitization (`+919876543210` == `09876543210` == `9876543210`), duplicate score calculation.
+   - BOM Generator: Validates parts list for all 10 standard package configurations; verifies automatic extra cable calculation.
+   - Quotation calculations: Verifies arithmetic for hardware subtotal, labor, tax, discount, and net customer payable.
+2. **API Integration & Business Gate Tests (`server/test/customer-sales/integration/`):**
+   - **BR-SRV-001 (Qualification Gate):** Survey request rejected if preliminary qualification is not passed.
+   - **BR-SRV-002 (Survey Approval Gate):** Quotation creation fails with `403 Forbidden` if survey status != `APPROVED`.
+   - **BR-SRV-003 (Rework Protocol):** Rejecting/reworking survey requires reason length $\ge 10$ characters.
+   - **BR-QTE-001 (BOM Generation):** BOM cannot be fabricated manually; derived from package templates.
+   - **BR-QTE-002 (Order Creation Gate):** Order creation fails with `400 Bad Request` if quotation status != `ACCEPTED`.
+   - **BR-QTE-003 (Quote Expiry):** Accepting expired quote fails with `400 Bad Request (QUOTE_EXPIRED)`.
+3. **End-to-End Workflow Verification:**
+   - Happy path: Public Web Enquiry ➔ Qualify ➔ Request Survey ➔ Mobile Execute with Photos ➔ Approve Survey ➔ Generate Quote with BOM ➔ Customer Accepts via Token ➔ Order Created & Handover Emitted.
 
 ---
 
 ## 10. Conclusion & Integration Readiness
 
-This document defines the strict, unalterable interface contract for Member 2's implementation. Once approved by the Technical Lead, implementation will proceed systematically through Phases 1 to 5:
-- **Phase 1:** Customer Registration, Search, Profile Dossier, and Timeline.
-- **Phase 2:** Enquiry Ingestion, Deduplication, and Telephone Qualification.
-- **Phase 3:** Site Survey Mobile Forms, Cloudinary Photo Proofs, and Approval Gates.
-- **Phase 4:** Packages Catalog, Automated BOM Generator, and Quotation Acceptance.
-- **Phase 5:** Order Creation and Operations Handover Contract.
+This revised contract incorporates all corrections from Phase 0 review:
+- Separates immutable specification rules from configurable `[NC]` policies.
+- Establishes clear technician scheduling boundaries with Member 3.
+- Formalizes Operations and Finance API handover payloads without assuming internal table names.
+- Enforces the survey approval and quotation acceptance business gates.
 
-**Module Status:** PHASE 0 CONTRACT COMPLETE. Standing by for Phase 1 implementation approval.
+**Module Status:** PHASE 0 CONTRACT REVISED & READY FOR PHASE 1 APPROVAL.
