@@ -205,19 +205,17 @@ Solar-Installation-Manegement-System/
 1. **Order Creation Prerequisite (Explicit Spec Invariant):**
    - An Order and Project **CANNOT** be created from a Draft, Sent, Expired, or Declined quotation.
    - Quotation status must strictly equal `ACCEPTED` (BR-QTE-002).
-2. **Order & Payment Status Fields (Harmonized with Members 3 & 4):**
-   - To avoid conflating commercial milestones with financial payments, `orders` explicitly separates:
+2. **Order & Payment Status Fields [PENDING CROSS-MODULE ALIGNMENT]:**
+   - **Proposed Architectural Separation (Member 2):** To avoid conflating commercial milestones with financial payments, Member 2 proposes:
      - `order_status`: `CONFIRMED` ➔ `IN_FULFILMENT` ➔ `COMPLETED` | `CANCELLED`.
      - `payment_status`: `PENDING_ADVANCE` ➔ `ADVANCE_PAID` ➔ `FULLY_PAID`.
-   - Operations (Member 3) checks `orders.payment_status IN ('ADVANCE_PAID', 'FULLY_PAID')` before releasing a dispatch order.
-   - Finance (Member 4) updates `orders.payment_status` upon Razorpay cryptographic HMAC or webhook verification.
-3. **Cross-Module Handover Protocol:**
-   - **To Member 3 (Operations):**
-     1. Member 2 creates `orders`, `projects`, and `project_bom_items` in the shared database.
-     2. Member 2 triggers stock reservation via Member 3's REST API:
-        ```text
-        POST /api/v1/operations/projects/:id/reserve-stock
-        ```
+   - **Current Cross-Module Status [UNRESOLVED / MISMATCH]:**
+     - **Member 3 (Operations):** Explicitly rejects `payment_status` in `docs/contracts/operations.md` (§4.1): *"Note: The field payment_status is not present in orders. Operations checks orders.status directly"*, expecting a unified `orders.status` (`PENDING_ADVANCE`, `ADVANCE_PAID`, `PROCESSING`, `DISPATCHED`, `COMPLETED`, `CANCELLED`).
+     - **Member 4 (Support & Finance):** Does not update `orders` directly upon payment capture; Member 4 records captured payments in `payments` (`status = 'VERIFIED'`) and updates `payment_requests` (`status = 'Paid'`).
+     - **Resolution Required Before Phase 1:** Architecture Lead / Members must formally approve either (A) unified `orders.status` with composite values, or (B) dual columns `order_status` + `payment_status` across all module migrations.
+3. **Cross-Module Handover Protocol [PENDING MEMBER 3 HARMONIZATION]:**
+   - **Target Architecture (Agreed Principle):** Member 2 creates `orders`, `projects`, and populates frozen `project_bom_items` upon quotation acceptance. Operations consumes the BOM for stock reservation.
+   - **Contract Discrepancy:** Member 3's latest contract (`docs/contracts/operations.md` §15.1, §12 in commit `8366560`) still specifies that Operations defines `project_bom_items` in `102_operations.sql` and populates it via `POST /api/v1/operations/projects/handover`. Member 3's contract correction is **PENDING**.
    - **To Member 4 (Finance):**
      1. Member 2 makes the order available in the database.
      2. Customer or Sales triggers Razorpay advance payment order creation via Member 4's REST API:
@@ -637,8 +635,8 @@ CREATE INDEX IF NOT EXISTS idx_proj_bom_product_id ON project_bom_items(product_
   ```
 
 #### B. Database Inbound Dependency Handover (Member 3 Spec §15.1)
-Member 3's contract specifies direct database reading of accepted project orders and parts:
-1. **`orders` table:** Created by Member 2 with `payment_status` (`PENDING_ADVANCE`, `ADVANCE_PAID`, `FULLY_PAID`) and `customer_id`.
+Member 3's contract specifies reading accepted project orders and parts:
+1. **`orders` table:** Created by Member 2 with commercial terms (`customer_id`, `total_contract_value`, `advance_required_percent`). (Note: `order_status` vs `orders.status` is [PENDING CROSS-MODULE ALIGNMENT]).
 2. **`projects` table:** Created by Member 2 with `projects.id`, `capacity_kw`, `grid_type`, `current_stage`.
 3. **`project_bom_items` table:** Authoritatively populated by Member 2 upon quotation acceptance. Contains the exact columns required by Member 3:
    - `id`: UUID Primary Key
@@ -673,8 +671,8 @@ When an order is created, the customer or sales representative initiates payment
     "purpose": "ADVANCE"
   }
   ```
-- **Server Authority:** Member 4's backend queries `orders.total_contract_value` and calculates the advance amount in paise server-side (`[NC-001]`). The client never submits an arbitrary amount.
-- **Payment Verification:** Upon successful Razorpay HMAC verification or webhook receipt, Member 4 updates `orders.payment_status = 'ADVANCE_PAID'`.
+- **Server Authority:** Member 4's backend queries `orders.total_contract_value` (or linked invoice) and calculates the advance amount in paise server-side (`[NC-001]`). The client never submits an arbitrary amount.
+- **Payment Verification [PENDING STATUS HARMONIZATION]:** Upon successful Razorpay HMAC verification or webhook receipt, Member 4 inserts the payment into `payments` (`status = 'VERIFIED'`) and updates `payment_requests` (`status = 'Paid'`). Updating `orders.payment_status` vs `orders.status` is pending cross-module status harmonization between Members 2, 3, and 4.
 
 #### B. Customer 360 Query Interface
 Member 4 queries Member 2's customer directory:
