@@ -110,10 +110,14 @@ Harmonized against Member 1 (`docs/integration/module-integration-checklist.md`)
 | **Commercial Status** | `order_status VARCHAR(50)` | `CONFIRMED` -> `IN_FULFILMENT` -> `COMPLETED` -> `CANCELLED`. |
 | **Financial Status** | `payment_status VARCHAR(50)` | `PENDING_ADVANCE` -> `ADVANCE_PAID` -> `FULLY_PAID`. |
 | **Monetary Representation** | Dual: `total_contract_value` & `total_paise` | Commercial invoices display Rupee decimals; payment processing operates in integer paise (`amount_paise = total_contract_value * 100`). |
-| **Advance Requirement** | `25.0%` (`[NC-001]`) | Advance amount derived server-side as `(total_paise * 25) / 100`. |
+| **Advance Requirement** | Configurable, default `25.0%` (`[NC-001]`) | Advance amount derived server-side as `(total_paise * advance_percent) / 100`. Configurable via payload (`advance_percent`) or environment variable `ADVANCE_PAYMENT_PERCENT`. No unconfirmed policy assumptions are enforced. |
 | **Foreign Keys** | `customer_id REFERENCES customers(id)` | Order links directly to customer identity. |
 
-### B. Warranty Integration (Member 3 Operations Contract Alignment)
+### B. Clean Database Migration Ownership (Zero Cross-Module Conflicts)
+- **Exclusive Member 4 Scope:** `server/src/db/migrations/103_support_finance.sql` creates exclusively Member 4 tables (`payment_requests`, `payment_attempts`, `payments`, `razorpay_webhook_events`, `payment_reconciliations`, `invoices`, `invoice_items`, `expenses`, `technician_pay_records`, `subsidy_applications`, `support_cases`, `case_messages`, `service_tickets`, `service_charges`, `help_articles`, `ai_requests`).
+- **Zero Duplication:** It does not independently create or duplicate tables owned by Member 2 (`customers`, `orders`) or Member 3 (`projects`, `products`, `serial_items`). All prerequisite dependencies are strictly coordinated with Member 1's migration sequence.
+
+### C. Warranty Integration (Member 3 Operations Contract Alignment)
 1. **Authoritative Table:**
    - `serial_items` is the sole physical table in PostgreSQL (`server/src/db/migrations/001_foundation.sql`).
    - `serial_registry` compatibility view is defined for seamless backwards compatibility.

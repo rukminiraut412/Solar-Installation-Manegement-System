@@ -30,7 +30,15 @@ function safeTimingCompare(providedSig, expectedSig) {
 
 export const PaymentsService = {
   // 1. Create Payment Request with Idempotency Protection (§17.1, §17.4)
-  async createPaymentRequest({ order_id = 'ord-101', purpose = 'ADVANCE', idempotency_key }) {
+  async createPaymentRequest(payload) {
+    const { 
+      order_id = 'ord-101', 
+      purpose = 'ADVANCE', 
+      idempotency_key,
+      advance_percent,
+      amount_paise 
+    } = payload || {};
+
     if (!idempotency_key) {
       const err = new Error('Header Idempotency-Key is mandatory for payment order creation');
       err.code = 'IDEMPOTENCY_KEY_REQUIRED';
@@ -67,10 +75,19 @@ export const PaymentsService = {
       throw err;
     }
 
-    // Advance rule: 25% of total order [NC-001] agreed contract
-    let targetPaise = Math.min(Math.round(totalAmount * 0.25), remainingBalance);
-    if (purpose === 'BALANCE' || purpose === 'FULL') {
+    // [NC-001] Configurable advance payment percentage (default demo 25.0% unless specified in payload or config)
+    const configurableAdvancePercent = (advance_percent !== undefined)
+      ? Number(advance_percent)
+      : (Number(process.env.ADVANCE_PAYMENT_PERCENT) || 25.0);
+
+    let targetPaise;
+    if (amount_paise && Number(amount_paise) > 0) {
+      targetPaise = Math.min(Number(amount_paise), remainingBalance);
+    } else if (purpose === 'BALANCE' || purpose === 'FULL') {
       targetPaise = remainingBalance;
+    } else {
+      // Configurable advance percentage [NC-001]
+      targetPaise = Math.min(Math.round((totalAmount * configurableAdvancePercent) / 100), remainingBalance);
     }
 
     const requestId = `pr-${Date.now()}`;
