@@ -113,9 +113,16 @@ Harmonized against Member 1 (`docs/integration/module-integration-checklist.md`)
 | **Advance Requirement** | Configurable, default `25.0%` (`[NC-001]`) | Advance amount derived server-side as `(total_paise * advance_percent) / 100`. Configurable via payload (`advance_percent`) or environment variable `ADVANCE_PAYMENT_PERCENT`. No unconfirmed policy assumptions are enforced. |
 | **Foreign Keys** | `customer_id REFERENCES customers(id)` | Order links directly to customer identity. |
 
-### B. Clean Database Migration Ownership (Zero Cross-Module Conflicts)
+### B. Clean Database Migration Ownership & Foreign Key Types
 - **Exclusive Member 4 Scope:** `server/src/db/migrations/103_support_finance.sql` creates exclusively Member 4 tables (`payment_requests`, `payment_attempts`, `payments`, `razorpay_webhook_events`, `payment_reconciliations`, `invoices`, `invoice_items`, `expenses`, `technician_pay_records`, `subsidy_applications`, `support_cases`, `case_messages`, `service_tickets`, `service_charges`, `help_articles`, `ai_requests`).
-- **Zero Duplication:** It does not independently create or duplicate tables owned by Member 2 (`customers`, `orders`) or Member 3 (`projects`, `products`, `serial_items`). All prerequisite dependencies are strictly coordinated with Member 1's migration sequence.
+- **Zero Duplication:** It does not independently create or duplicate tables owned by Member 2 (`customers`, `orders`) or Member 3 (`projects`, `products`, `serial_items`).
+- **Foreign Key Data Types Harmonized:** Foreign key columns referencing external tables match the `UUID` standard established in `001_platform_foundation.sql`, `101_customer_sales.sql`, and `102_operations.sql`:
+  - `orders(id)` referenced via `UUID` in `payment_requests(order_id)`, `payments(order_id)`, `invoices(order_id)`.
+  - `customers(id)` referenced via `UUID` in `invoices(customer_id)`, `subsidy_applications(customer_id)`, `support_cases(customer_id)`.
+  - `projects(id)` referenced via `UUID` in `expenses(project_id)`, `subsidy_applications(project_id)`, `support_cases(project_id)`.
+  - `products(id)` referenced via `UUID` in `support_cases(product_id)`.
+  - `serial_items(id)` referenced via `UUID` in `support_cases(serial_item_id)`, `service_tickets(serial_item_id)`.
+- **Execution Order:** `001_platform_foundation.sql` -> `101_customer_sales.sql` -> `102_operations.sql` -> `103_support_finance.sql`.
 
 ### C. Warranty Integration (Member 3 Operations Contract Alignment)
 1. **Authoritative Table:**
