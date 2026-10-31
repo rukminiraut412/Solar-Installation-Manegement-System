@@ -12,8 +12,7 @@
  * Never silently treats unavailable or offline warranty data as confirmed coverage.
  */
 
-import { ENV } from '../../config/env.js';
-import { query } from '../../db/connection.js';
+import { ENV, query } from './db.js';
 import { store } from './store.js';
 
 const isProduction = () => (process.env.NODE_ENV === 'production' || ENV.NODE_ENV === 'production');

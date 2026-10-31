@@ -4,8 +4,7 @@
  * Never trusts client-supplied role or user headers in production mode.
  */
 
-import { ENV } from '../../config/env.js';
-import { query } from '../../db/connection.js';
+import { ENV, query } from './db.js';
 import { CasesService } from './cases.service.js';
 import { TicketsService } from './tickets.service.js';
 import { PaymentsService } from './payments.service.js';

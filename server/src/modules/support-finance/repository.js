@@ -9,8 +9,7 @@
  * Strictly prohibits silent in-memory fallback when running in production mode.
  */
 
-import { ENV } from '../../config/env.js';
-import { query, pool } from '../../db/connection.js';
+import { ENV, query, pool } from './db.js';
 import { store } from './store.js';
 
 let isPostgresLive = null;

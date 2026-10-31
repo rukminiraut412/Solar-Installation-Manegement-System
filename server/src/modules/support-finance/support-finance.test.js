@@ -11,9 +11,9 @@ import { evaluateSafety, FIXED_SAFETY_NOTICE } from './safety.js';
 import { Repository } from './repository.js';
 import { WarrantyAdapter } from './warranty.adapter.js';
 import { SupportFinanceController } from './controller.js';
-import { requireRole } from '../../middleware/auth.middleware.js';
+import { requireRole } from './auth.js';
 import routes from './routes.js';
-import { ENV } from '../../config/env.js';
+import { ENV } from './db.js';
 
 // ====================================================================
 // SECTION A: BASELINE FUNCTIONALITY & WORKFLOW TESTS (MOCKED / ISOLATED)

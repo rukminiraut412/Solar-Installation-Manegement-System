@@ -8,7 +8,7 @@
  */
 
 import crypto from 'crypto';
-import { ENV } from '../../config/env.js';
+import { ENV } from './db.js';
 import { Repository } from './repository.js';
 
 const isProduction = () => (process.env.NODE_ENV === 'production' || ENV.NODE_ENV === 'production');

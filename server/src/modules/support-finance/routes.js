@@ -13,7 +13,7 @@
 
 import { Router } from 'express';
 import { SupportFinanceController } from './controller.js';
-import { authenticate, requireRole } from '../../middleware/auth.middleware.js';
+import { authenticate, requireRole } from './auth.js';
 
 const router = Router();
 
