@@ -150,7 +150,7 @@ All routes are defined under `/api/v1/support-finance`:
 ## 7. Verification, Testing & PostgreSQL Status
 
 1. **Automated Backend Tests:**
-   - **24/24 tests PASSING** (0 failed, 0 skipped in `server/src/modules/support-finance/support-finance.test.js`).
+   - **25/25 tests PASSING** (0 failed, 0 skipped in `server/src/modules/support-finance/support-finance.test.js`).
    - Dedicated tests verify:
      - Pre-model safety interceptor and P1 emergency pinning.
      - 33-transition case FSM and customer dispute re-opening.
@@ -163,11 +163,12 @@ All routes are defined under `/api/v1/support-finance`:
      - AI grounding, dual-panel plain language warranty, and hazard screening.
      - Unauthorized access rejection (401 for unauthenticated, 403 for unauthorized roles).
      - Missing database tables and production fail-fast (no fallback in production mode).
+     - Controller security: Zero silent demo-admin fallback on unauthenticated requests.
 2. **Frontend Production Build:**
    - **PASSING:** `npm run build` in `client/` succeeded with 0 errors (Vite v6.4.5 built 2217 modules into `dist/`).
 3. **Live PostgreSQL Status:**
    - **UNVERIFIED (LOCAL DB OFFLINE / ACCESS DENIED):**
-   - The local PostgreSQL instance returns `password authentication failed for user "postgres"`.
+   - The local PostgreSQL service (`postgresql-x64-18`) is active on Windows localhost:5432, but requires specific credentials. The default connection string `postgresql://postgres:postgres@localhost:5432/solar_management` fails with `password authentication failed for user "postgres"`.
    - In accordance with audit instructions, live database testing is **NOT** claimed as passed.
    - All tests currently execute against isolated unit/mock layers, while production fail-fast error handling guarantees that production mode will never silently fall back to memory.
 

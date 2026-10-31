@@ -21,27 +21,39 @@ const isProduction = () => (process.env.NODE_ENV === 'production' || ENV.NODE_EN
  * In production mode, client headers like x-role or x-user-role are completely ignored.
  */
 function getUserContext(req) {
-  if (isProduction()) {
-    if (!req.user || !req.user.role) {
-      const err = new Error('Unauthorized: Valid authenticated session required in production');
-      err.code = 'UNAUTHORIZED';
-      err.statusCode = 401;
-      err.status = 401;
-      throw err;
-    }
+  // 1. Authenticated session via Member 1's auth middleware
+  if (req.user && req.user.role) {
     return {
-      userId: req.user.id || 'usr-prod-anon',
+      userId: req.user.id || 'usr-anon',
       role: req.user.role,
-      name: req.user.name || 'Authorized User'
+      name: req.user.name || req.user.full_name || 'Staff User'
     };
   }
 
-  // Development/Test fallback: Allowed only outside production
-  const role = req.user?.role || req.headers['x-role'] || req.headers['x-user-role'] || 'Admin';
-  const userId = req.user?.id || req.headers['x-user-id'] || 'usr-dev-01';
-  const name = req.user?.name || req.headers['x-user-name'] || 'Staff User';
+  // 2. Strict rejection in production mode
+  if (isProduction()) {
+    const err = new Error('Unauthorized: Valid authenticated session required in production');
+    err.code = 'UNAUTHORIZED';
+    err.statusCode = 401;
+    err.status = 401;
+    throw err;
+  }
 
-  return { userId, role, name };
+  // 3. Isolated test header support (only if explicitly provided by test runner)
+  if (req.headers && (req.headers['x-role'] || req.headers['x-user-role'])) {
+    return {
+      userId: req.headers['x-user-id'] || 'usr-test-01',
+      role: req.headers['x-role'] || req.headers['x-user-role'],
+      name: req.headers['x-user-name'] || 'Test User'
+    };
+  }
+
+  // 4. Strictly reject unauthenticated requests - no silent demo-admin fallback!
+  const err = new Error('Unauthorized: Authentication required');
+  err.code = 'UNAUTHORIZED';
+  err.statusCode = 401;
+  err.status = 401;
+  throw err;
 }
 
 export const SupportFinanceController = {
@@ -51,7 +63,7 @@ export const SupportFinanceController = {
       const userCtx = getUserContext(req);
       const casePayload = {
         ...req.body,
-        customer_id: req.body.customer_id || (userCtx.role === 'Customer' ? userCtx.userId : 'cus-001')
+        customer_id: req.body.customer_id || req.user?.customer_id || 'cus-001'
       };
       const result = await CasesService.createCase(casePayload);
       res.status(201).json({ success: true, case: result, data: result });
@@ -65,7 +77,7 @@ export const SupportFinanceController = {
       const userCtx = getUserContext(req);
       const cases = await CasesService.listCases({
         role: userCtx.role,
-        customer_id: req.query.customer_id || (userCtx.role === 'Customer' ? userCtx.userId : undefined),
+        customer_id: req.query.customer_id || req.user?.customer_id || undefined,
         status: req.query.status,
         priority: req.query.priority
       });
@@ -88,7 +100,7 @@ export const SupportFinanceController = {
   async addMessage(req, res, next) {
     try {
       const userCtx = getUserContext(req);
-      const author_type = userCtx.role.toUpperCase() === 'CUSTOMER' ? 'CUSTOMER' : 'SUPPORT';
+      const author_type = (req.user?.customer_id || userCtx.role === 'Customer') ? 'CUSTOMER' : 'SUPPORT';
       const message = await CasesService.addMessage(req.params.id, {
         ...req.body,
         author_id: userCtx.userId,

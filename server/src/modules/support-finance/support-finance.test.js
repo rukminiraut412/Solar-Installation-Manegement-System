@@ -658,3 +658,22 @@ test('24. Warranty Integration: Sole Authoritative Table serial_items & Missing 
   }
 });
 
+test('25. Controller Security: Zero Silent Demo-Admin Fallback on Unauthenticated Requests', async () => {
+  // Test createCase when called with no authentication context and no test header
+  const reqUnauth = {
+    body: { description: 'Inverter error light is blinking red' },
+    headers: {}
+  };
+  let errorCaught = null;
+  const res = {};
+  await SupportFinanceController.createCase(reqUnauth, res, (err) => {
+    errorCaught = err;
+  });
+
+  assert.ok(errorCaught, 'Unauthenticated request must be rejected');
+  assert.equal(errorCaught.statusCode, 401);
+  assert.equal(errorCaught.code, 'UNAUTHORIZED');
+  assert.equal(errorCaught.message, 'Unauthorized: Authentication required');
+});
+
+
