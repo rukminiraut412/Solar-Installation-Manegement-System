@@ -194,3 +194,80 @@ import {
 if (!survey) throw new NotFoundError('Site survey not found');
 if (!isApproved) throw new BadRequestError('Cannot generate quote before survey approval');
 ```
+
+---
+
+## 8. Cloudinary Shared File Upload Interface (For Members 2 & 3)
+
+Direct client uploads allow mobile phones (site surveys, roof completion photos, customer screen signatures) to upload directly to Cloudinary without streaming high-bandwidth binary through the backend Express server.
+
+### A. Obtain Signed Upload Parameters
+Make an authenticated request from frontend or API client:
+- **Endpoint:** `POST /api/v1/media/sign-upload`
+- **Request Body:**
+  ```json
+  {
+    "folder": "surveys | installations | signatures | receipts | tickets",
+    "resourceType": "image" // or "raw" for PDF documents
+  }
+  ```
+- **Response Data:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "cloudName": "your_cloud_name",
+      "apiKey": "your_api_key",
+      "timestamp": 1730370000,
+      "folder": "installations",
+      "signature": "3b2f56789...",
+      "uploadUrl": "https://api.cloudinary.com/v1_1/your_cloud_name/image/upload",
+      "maxFileSize": 10485760,
+      "allowedFormats": ["jpg", "jpeg", "png", "webp", "pdf"],
+      "isMock": false
+    }
+  }
+  ```
+
+### B. Client Direct Upload Code Example (Browser / Mobile)
+```javascript
+// 1. Get signature from backend
+const { data: signData } = await api.post('/media/sign-upload', {
+  folder: 'installations',
+});
+
+// 2. Upload file directly to Cloudinary
+const formData = new FormData();
+formData.append('file', fileObject);
+formData.append('api_key', signData.data.apiKey);
+formData.append('timestamp', signData.data.timestamp);
+formData.append('signature', signData.data.signature);
+formData.append('folder', signData.data.folder);
+
+const cloudinaryRes = await axios.post(signData.data.uploadUrl, formData);
+const secureUrl = cloudinaryRes.data.secure_url; // Store this in your PostgreSQL table
+```
+
+### C. Backend Direct Upload Validation Utility
+```javascript
+import { validateMediaMetadata } from '../../shared/utils/cloudinary.js';
+
+// Validate file metadata before saving to DB
+validateMediaMetadata({ format: 'png', bytes: 2048576 });
+```
+
+---
+
+## 9. Data Sanitization & Privacy Guards
+
+### A. Stripping Confidential Financial Figures (For Non-Admins)
+Use `filterConfidentialData(recordOrArray, req.user.role)` or `sanitizeFinancialResponse` middleware to prevent non-admins from viewing:
+- `profit_margin`, `net_profit`, `gross_margin`
+- `cost_price`, `internal_cost`
+- `technician_cost`, `technician_payout`, `hourly_rate`
+
+### B. Stripping Internal Data for Customer-Facing Views
+Use `filterCustomerFacingData(recordOrArray)` to prevent customers from viewing:
+- `internal_notes`, `internalNotes`
+- `risk_score`, `fraud_check_flags`
+- All confidential pricing and profit margins

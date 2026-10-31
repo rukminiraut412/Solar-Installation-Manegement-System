@@ -8,6 +8,7 @@ import { successResponse } from './shared/utils/response.js';
 import { notFoundHandler } from './middleware/notFoundHandler.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import authRouter from './modules/auth/auth.routes.js';
+import mediaRouter from './shared/routes/media.routes.js';
 
 const app = express();
 
@@ -63,6 +64,9 @@ const apiRouter = express.Router();
 
 // Mount Platform Foundation Auth module
 apiRouter.use('/auth', authRouter);
+
+// Mount Platform Foundation Shared Media Upload module
+apiRouter.use('/media', mediaRouter);
 
 // Mount API router
 app.use('/api/v1', apiRouter);
