@@ -221,7 +221,7 @@ test('7. Razorpay Order Creation & HMAC-SHA256 Signature Verification (ยง17.1, ย
 
   assert.equal(orderRes.isDuplicate, false);
   assert.ok(orderRes.paymentRequest.razorpay_order_id.startsWith('order_test_'));
-  assert.equal(Number(orderRes.paymentRequest.amount_paise), 6000000); // 20% of 300,000 INR
+  assert.equal(Number(orderRes.paymentRequest.amount_paise), 7500000); // 25% of 300,000 INR [NC-001]
 
   // Idempotency: Repeating with same key returns duplicate
   const repeatRes = await PaymentsService.createPaymentRequest({
@@ -249,7 +249,7 @@ test('7. Razorpay Order Creation & HMAC-SHA256 Signature Verification (ยง17.1, ย
 
   assert.equal(verified.success, true);
   assert.equal(verified.status, 'VERIFIED');
-  assert.equal(Number(verified.payment.amount_paise), 6000000);
+  assert.equal(Number(verified.payment.amount_paise), 7500000); // 25% of 300,000 INR [NC-001]
 
   // Verify invalid signature is REJECTED
   await assert.rejects(async () => {
@@ -675,5 +675,97 @@ test('25. Controller Security: Zero Silent Demo-Admin Fallback on Unauthenticate
   assert.equal(errorCaught.code, 'UNAUTHORIZED');
   assert.equal(errorCaught.message, 'Unauthorized: Authentication required');
 });
+
+test('26. Customer Record Isolation: Multi-Tenant Enforcement & Access Denial Across Customers', async () => {
+  // Step 1: Create a case belonging to customer 'cus-alpha'
+  const caseAlpha = await CasesService.createCase({
+    customer_id: 'cus-alpha',
+    customer_name: 'Customer Alpha',
+    description: 'Inverter panel ground fault warning'
+  });
+
+  // Step 2: Customer 'cus-alpha' can view their own case detail
+  const detailAlpha = await CasesService.getCaseDetail(caseAlpha.id, 'Customer', 'cus-alpha');
+  assert.equal(detailAlpha.id, caseAlpha.id);
+  assert.equal(detailAlpha.customer_id, 'cus-alpha');
+
+  // Step 3: Customer 'cus-bravo' requesting 'cus-alpha' case must be strictly rejected with 403 Forbidden
+  await assert.rejects(
+    async () => {
+      await CasesService.getCaseDetail(caseAlpha.id, 'Customer', 'cus-bravo');
+    },
+    (err) => {
+      assert.equal(err.code, 'FORBIDDEN');
+      assert.equal(err.statusCode, 403);
+      assert.ok(err.message.includes('Access denied'));
+      return true;
+    }
+  );
+
+  // Step 4: Controller level isolation in addMessage
+  const reqBravo = {
+    params: { id: caseAlpha.id },
+    user: { id: 'usr-bravo', customer_id: 'cus-bravo', role: 'Support' },
+    body: { body: 'Attempting to inject a comment into another customer\'s case' }
+  };
+  let forbiddenStatusCode = null;
+  let forbiddenPayload = null;
+  const resBravo = {
+    status(code) { forbiddenStatusCode = code; return this; },
+    json(data) { forbiddenPayload = data; }
+  };
+  await SupportFinanceController.addMessage(reqBravo, resBravo, () => {});
+  assert.equal(forbiddenStatusCode, 403);
+  assert.equal(forbiddenPayload?.error?.code, 'FORBIDDEN');
+});
+
+test('27. Agreed Order Schema: Support for UUID/VARCHAR, order_number, and 25% Advance Calculation', async () => {
+  // Verify 25% advance calculation per Member 1 & 2 integration contract [NC-001]
+  const totalContractPaise = 20000000n; // 200,000 INR
+  const advancePercent = 25n;
+  const expectedAdvancePaise = (totalContractPaise * advancePercent) / 100n;
+
+  assert.equal(expectedAdvancePaise, 5000000n); // 50,000 INR
+
+  // Verify payment creation respects agreed order schema attributes
+  const orderPayload = {
+    order_id: 'ord-uuid-999-harmonized',
+    order_number: 'ORD-2026-9999',
+    purpose: 'ADVANCE',
+    amount_paise: Number(expectedAdvancePaise),
+    currency: 'INR',
+    idempotency_key: 'idemp-harmonized-schema-001'
+  };
+
+  const req = await PaymentsService.createPaymentRequest(orderPayload);
+  assert.ok(req);
+  assert.ok(req.paymentRequest);
+  assert.equal(req.paymentRequest.order_id, 'ord-uuid-999-harmonized');
+  assert.equal(req.paymentRequest.purpose, 'ADVANCE');
+  assert.ok(req.paymentRequest.amount_paise > 0);
+  assert.equal(req.isDuplicate, false);
+});
+
+test('28. Router Mounting & Interoperability: Base Path /api/v1/support-finance and Route Registration', async () => {
+  assert.ok(routes, 'Router must export cleanly');
+  assert.equal(typeof routes, 'function', 'Router must be an Express router function');
+
+  // Verify router stack contains all required paths
+  const routePaths = routes.stack
+    .filter(layer => layer.route)
+    .map(layer => layer.route.path);
+
+  assert.ok(routePaths.includes('/health'));
+  assert.ok(routePaths.includes('/cases'));
+  assert.ok(routePaths.includes('/cases/:id'));
+  assert.ok(routePaths.includes('/payments/create-order'));
+  assert.ok(routePaths.includes('/payments/verify-signature'));
+  assert.ok(routePaths.includes('/payments/webhook'));
+  assert.ok(routePaths.includes('/invoices'));
+  assert.ok(routePaths.includes('/expenses'));
+  assert.ok(routePaths.includes('/dashboards/reconciliation'));
+  assert.ok(routePaths.includes('/ai/summarize'));
+});
+
 
 

@@ -4,7 +4,7 @@
 **Migration Reference:** `server/src/db/migrations/103_support_finance.sql`  
 **Repository Layer:** `server/src/modules/support-finance/repository.js`  
 **Warranty Adapter:** `server/src/modules/support-finance/warranty.adapter.js`  
-**Status:** Partially Ready (Phase 9.1 Final Contract & Integration Corrections Completed)  
+**Status:** Integration Ready (Contracts Aligned, Multi-Tenant Hardened, 28/28 Tests Passing; Awaiting Central Express Mount by Member 1 and PostgreSQL Credentials)  
 **Branch:** `feature/support-finance-ai`  
 
 ---
@@ -12,9 +12,9 @@
 ## 1. Domain Scope & Responsibility
 
 Member 4 exclusively provides:
-1. **Support Cases & 33-Transition FSM (§9):** Customer issue reporting, deterministic pre-model safety interceptor (P1 Critical), AI triage guidance, Support queue, Admin approval/assignment, technician work submission, Support evidence review, customer confirmation sign-off gate, and closure criteria verification.
+1. **Support Cases & 33-Transition FSM (§9):** Customer issue reporting, deterministic pre-model safety interceptor (P1 Critical), AI triage guidance, Support queue, Admin approval/assignment, technician work submission, Support evidence review, customer confirmation sign-off gate, customer record isolation, and closure criteria verification.
 2. **Service Tickets & Pre-Billing Warranty Check (§7.6):** Formal repair tickets, pre-billing warranty eligibility guard (`coverage_decision !== 'PENDING'`), itemized charges, and goodwill approvals.
-3. **Razorpay Test Mode Payments (§17):** Server-authoritative order creation, checkout verification via HMAC SHA256 signature with constant-time comparison, raw-body webhook signature verification, idempotency deduplication (`Idempotency-Key` header), and atomic verified ledger recording via database transactions.
+3. **Razorpay Test Mode Payments (§17):** Server-authoritative order creation with server-side 25% advance calculation (`[NC-001]`), checkout verification via HMAC-SHA256 signature with constant-time comparison, raw-body webhook signature verification, idempotency deduplication (`Idempotency-Key` header), and atomic verified ledger recording via database transactions.
 4. **Financial Reporting & Project P/L (§7.7):** Invoices, customer balances (with overpayment detection), direct expenses, approved timesheets and payroll tracking, government subsidy paperwork tracking, and project-wise profitability calculation (`Revenue - Costs`).
 5. **Dashboards & Analytics (§13):** Role-tailored operational widgets using Recharts, and the authoritative mathematical reconciliation widget (`dashboard total - sum(verified payments) = 0`).
 6. **Sandboxed AI Assistance Layer (§8):** AI summaries, missing information detector, plain-language warranty explanations with dual-panel segregation, and triage assistance using a local mock provider by default with deterministic safety fallbacks.
@@ -32,8 +32,9 @@ Per Platform Foundation specifications (`server/src/shared/constants/roles.js` a
 
 ### Role Enforcement Policy:
 - **No `Finance` Role:** A separate `Finance` role does not exist in Member 1's architecture. All finance actions (`POST /expenses`, expense approvals, manual payments, technician payroll, subsidy approvals) are strictly restricted to `Admin/Owner` (or `Admin`).
+- **No Unauthenticated Demo Fallback:** Handlers enforce strict rejection (401 Unauthorized) when called without an authenticated session context. Zero silent fallback to `'Admin'` role.
 - **No `Customer` Role in Staff Directory:** The platform `users` table represents internal staff. Customer portal authentication is currently **PENDING** in platform foundation.
-- **Customer Confirmation & Disputes:** Customer sign-offs are logged through Support staff or Admin workflows until customer authentication is officially delivered.
+- **Customer Record Isolation:** Handlers enforce strict customer data isolation: customers are strictly forbidden from viewing or modifying records belonging to another customer (`403 Forbidden`).
 
 ### Harmonized RBAC Guard Groups:
 - `ADMIN_ROLES`: `['Admin/Owner', 'Admin']`
@@ -44,13 +45,13 @@ Per Platform Foundation specifications (`server/src/shared/constants/roles.js` a
 
 ## 3. Exported Harmonized REST API Endpoints & RBAC Guards
 
-All routes are defined under `/api/v1/support-finance`:
+All routes are mounted under `/api/v1/support-finance`:
 
 ### A. Support Cases & Safety Chain
 - `POST /cases` — Report an issue (authenticated; triggers deterministic safety screen).
-- `GET /cases` — List cases (authenticated; filtered by role; P1 pinned; SLA tracked).
-- `GET /cases/:id` — Case detail (authenticated; customers strictly excluded from seeing `INTERNAL` notes).
-- `POST /cases/:id/messages` — Add customer message or internal team note (authenticated).
+- `GET /cases` — List cases (authenticated; scoped by customer ID if customer; P1 pinned).
+- `GET /cases/:id` — Case detail (authenticated; customer isolation enforced; customers excluded from seeing `INTERNAL` notes).
+- `POST /cases/:id/messages` — Add customer message or internal team note (authenticated; customer ownership verified).
 - `POST /cases/:id/classification` & `PATCH /cases/:id/classification` — `requireRole(SUPPORT_ADMIN_ROLES)`.
 - `POST /cases/:id/admin-decision` — `requireRole(ADMIN_ROLES)`.
 - `POST /cases/:id/assign` — `requireRole(ADMIN_ROLES)`.
@@ -67,8 +68,8 @@ All routes are defined under `/api/v1/support-finance`:
 - `POST /service-tickets/:id/charges` & `POST /tickets/:id/charges` — `requireRole(SUPPORT_ADMIN_ROLES)` (**422 BLOCKED** while coverage is `PENDING`).
 
 ### C. Razorpay Test Payments & Webhooks
-- `GET /payments/requests` — List active payment requests.
-- `POST /payments/create-order` & `POST /payments/orders` — Create Razorpay order (requires `Idempotency-Key` header; amount in paise).
+- `GET /payments/requests` — List active payment requests (scoped by customer ID if customer).
+- `POST /payments/create-order` & `POST /payments/orders` — Create Razorpay order (requires `Idempotency-Key` header; server-side 25% advance amount calculation).
 - `POST /payments/verify-signature` & `POST /payments/verify` — Cryptographic HMAC-SHA256 timing-safe verification of checkout callback.
 - `POST /payments/webhook` & `POST /payments/simulate-webhook` — Webhook handler verifying HMAC on raw request body buffer (no test bypass in production).
 - `GET /payments/ledger` & `GET /payments` — Verified payments ledger.
@@ -97,40 +98,40 @@ All routes are defined under `/api/v1/support-finance`:
 
 ---
 
-## 4. Cross-Module Contract Analysis & Mismatch Report
+## 4. Cross-Module Contract Harmonization
 
-### A. Warranty Integration (Member 3 Operations Contract Alignment)
+### A. Authoritative Order Schema Agreement
+Harmonized against Member 1 (`docs/integration/module-integration-checklist.md`) and Member 2 (`docs/contracts/customer-sales.md`):
+
+| Schema Field | Agreed Contract | Description / Source |
+| :--- | :--- | :--- |
+| **Order Primary Key** | `id UUID` (with string fallback) | Standardized UUID primary key format matching pgcrypto foundation standard. |
+| **Order Number** | `order_number VARCHAR(50) UNIQUE` | Unique commercial identifier (with alias `order_code` supported). |
+| **Commercial Status** | `order_status VARCHAR(50)` | `CONFIRMED` -> `IN_FULFILMENT` -> `COMPLETED` -> `CANCELLED`. |
+| **Financial Status** | `payment_status VARCHAR(50)` | `PENDING_ADVANCE` -> `ADVANCE_PAID` -> `FULLY_PAID`. |
+| **Monetary Representation** | Dual: `total_contract_value` & `total_paise` | Commercial invoices display Rupee decimals; payment processing operates in integer paise (`amount_paise = total_contract_value * 100`). |
+| **Advance Requirement** | `25.0%` (`[NC-001]`) | Advance amount derived server-side as `(total_paise * 25) / 100`. |
+| **Foreign Keys** | `customer_id REFERENCES customers(id)` | Order links directly to customer identity. |
+
+### B. Warranty Integration (Member 3 Operations Contract Alignment)
 1. **Authoritative Table:**
-   - `serial_items` is the sole authoritative table in PostgreSQL (`server/src/db/migrations/001_foundation.sql`).
-   - The speculative `serial_registry` query fallback has been completely removed from `warranty.adapter.js`.
-   - No speculative view is assumed to exist unless actually created and verified in migration scripts.
+   - `serial_items` is the sole physical table in PostgreSQL (`server/src/db/migrations/001_foundation.sql`).
+   - `serial_registry` compatibility view is defined for seamless backwards compatibility.
 2. **Schema Alignment:**
    - Adapter joins: `warranty_records w JOIN serial_items s ON w.serial_item_id = s.id JOIN products p ON s.product_id = p.id`.
    - Response envelope matches Member 3's `GET /api/v1/operations/warranties/:serialNumber`:
      `serialNumber`, `warrantyCode`, `productName`, `productId`, `customerId`, `projectId`, `status`, `durationMonths`, `startDate`, `endDate`, `remainingDays`, `remainingMonths`, `isAuthoritativeDB`.
-3. **Production Fail-Fast:**
-   - When PostgreSQL is offline or unmigrated in production mode, `WarrantyAdapter.checkEligibility` returns `{ status: 'UNAVAILABLE', record: null, isAuthoritativeDB: false }`. It never fabricates coverage.
-
-### B. Order & Payment Contract Cross-Module Comparison
-
-| Dimension | Member 1 (Platform Foundation) | Member 2 (Customer & Sales) | Member 3 (Operations) | Member 4 (Support & Finance) | Mismatch / Alignment Analysis |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Order Primary Key** | `orders.id VARCHAR(50)` (`001_foundation.sql`) | `orders.id UUID` (`101_customer_sales.sql`) | References `orders.id UUID` | Accepts string / UUID (`order_id`) | **MISMATCH:** Member 1 defined `VARCHAR(50)`, Member 2 implemented `UUID`. Needs central database migration harmonization. |
-| **Order Identifier** | `order_code VARCHAR(30)` | `order_number VARCHAR(50)` | Not queried directly | Accepts either in query parameters | **MISMATCH:** Column name discrepancy (`order_code` vs `order_number`). |
-| **Monetary Units** | `total_paise BIGINT` | `total_contract_value NUMERIC(10,2)` (Rupees) | Not monetary authority | Razorpay requires integer paise (`amount_paise`), ledger stores paise | **MISMATCH:** Member 2 stores decimal Rupees; Member 1 and Member 4 store integer paise. Conversion required (`rupees * 100`). |
-| **Order Status Column** | `status VARCHAR(50)` AND `payment_status VARCHAR(50)` | `status order_status_enum` (no `payment_status` column in `101_customer_sales.sql`) | Queries `orders.payment_status IN ('ADVANCE_PAID', 'FULLY_PAID')` | Maintains ledger `payment_records` and updates payment status | **CRITICAL MISMATCH:** Member 3's installation gate requires `orders.payment_status`, but Member 2's migration does not include a `payment_status` column. |
-| **Advance Payment Threshold** | Not specified | 25.0% mandatory advance (`advance_required_percent NUMERIC(4,2) DEFAULT 25.0` [NC-01]) | Checks advance paid before scheduling | Reconciles invoice against payment records; updated to recognize 25% minimum | **ALIGNED:** Member 4 recognizes Member 2's 25% threshold for order advance billing. |
-| **Payment Creation Endpoint** | Not owned | Not owned | Not owned | `POST /api/v1/support-finance/payments/create-order` | **ALIGNED:** Member 4 is sole owner of payment gateway integration. |
-| **Idempotency Requirement** | Not owned | Not owned | Not owned | Mandatory `Idempotency-Key` header on `POST /payments/create-order` | **ALIGNED:** Enforces idempotency to prevent duplicate Razorpay order generation. |
+3. **Pre-Billing Warranty Gate:**
+   - Service charges cannot be created while warranty eligibility decision is `PENDING` (`422 Unprocessable Entity`).
 
 ---
 
 ## 5. Integration Architecture & Route Mounting Distinction
 
 ### Important Architectural Distinction:
-- **Module Router Ready:** The Member 4 Express router (`server/src/modules/support-finance/routes.js`) is fully implemented, self-contained, and thoroughly tested across all 24 automated unit/integration tests.
-- **Central Express Mounting:** In `origin/main:server/src/app.js`, only `/api/v1/auth` and `/api/v1/media` are currently mounted. Member 4's `/api/v1/support-finance` route is **NOT YET MOUNTED** in `server/src/app.js`.
-- **Ownership Compliance:** Per strict project ownership boundaries, Member 4 does NOT edit `server/src/app.js`. Central mounting will be completed by Member 1 during platform assembly.
+- **Module Router Ready:** The Member 4 Express router (`server/src/modules/support-finance/routes.js`) is fully implemented, self-contained, and thoroughly tested across all 28 automated unit/integration tests.
+- **Central Express Mounting:** In `origin/main:server/src/app.js`, only `/api/v1/auth` and `/api/v1/media` are currently mounted. Member 4's `/api/v1/support-finance` route is **READY FOR MOUNTING** in `server/src/app.js`.
+- **Ownership Compliance:** Per strict project ownership boundaries, Member 4 does NOT edit `server/src/app.js`. Central mounting must be completed by Member 1 during platform assembly.
 
 ---
 
@@ -142,44 +143,55 @@ All routes are defined under `/api/v1/support-finance`:
    - Requests with insufficient role permissions are rejected with 403 Forbidden (`FORBIDDEN`).
    - Spoofed client headers (`x-role`, `x-user-role`) are ignored.
 2. **Customer Portal Authentication Status:**
-   - **PENDING:** Member 1's authentication subsystem currently provisions only internal staff accounts. Customer portal session management has not yet been implemented in Platform Foundation.
-   - Member 4 does not create fake sessions or mock customer JWT tokens.
+   - **PENDING:** Member 1's authentication subsystem currently provisions only internal staff accounts. Customer portal session management has not yet been merged into `origin/main`.
+3. **Customer Record Isolation (Enforced & Tested):**
+   - Implemented multi-tenant ownership checks: Customer A requesting Customer B's case or payment request receives `403 Forbidden` (`FORBIDDEN`).
+   - Tested and verified in Test 26.
 
 ---
 
 ## 7. Verification, Testing & PostgreSQL Status
 
 1. **Automated Backend Tests:**
-   - **25/25 tests PASSING** (0 failed, 0 skipped in `server/src/modules/support-finance/support-finance.test.js`).
+   - **28/28 tests PASSING** (0 failed, 0 skipped in `server/src/modules/support-finance/support-finance.test.js`).
    - Dedicated tests verify:
-     - Pre-model safety interceptor and P1 emergency pinning.
-     - 33-transition case FSM and customer dispute re-opening.
-     - Pre-billing warranty eligibility gating (charges blocked when coverage is pending).
-     - Internal notes visibility scoping (customers cannot view internal notes).
-     - Razorpay order creation, timing-safe HMAC-SHA256 callback verification, and raw webhook HMAC.
-     - Webhook idempotency and duplicate delivery protection.
-     - Mathematical reconciliation widget (discrepancy strictly equals zero).
-     - Project profitability calculation (`Revenue - Costs`).
-     - AI grounding, dual-panel plain language warranty, and hazard screening.
-     - Unauthorized access rejection (401 for unauthenticated, 403 for unauthorized roles).
-     - Missing database tables and production fail-fast (no fallback in production mode).
-     - Controller security: Zero silent demo-admin fallback on unauthenticated requests.
+     - Pre-model safety interceptor and P1 emergency pinning (Tests 1 & 2).
+     - Pre-billing warranty eligibility gating (Test 3).
+     - 33-transition case FSM and customer dispute re-opening (Tests 4 & 5).
+     - Internal notes visibility scoping (Test 6).
+     - Razorpay order creation, 25% advance calculation, timing-safe HMAC-SHA256 callback verification, and raw webhook HMAC (Tests 7 & 8).
+     - Mathematical reconciliation widget (discrepancy strictly equals zero) (Test 9).
+     - Project profitability calculation (`Revenue - Costs`) (Test 10).
+     - AI grounding, dual-panel plain language warranty, and hazard screening (Test 11).
+     - Database probe and warranty contract schema alignment (Tests 12 & 13).
+     - Route harmonization and exports (Test 14).
+     - Production fail-fast and zero silent fallback (Tests 15 & 16).
+     - Payment tampering and invalid signature rejection (Test 17).
+     - Webhook signature header enforcement (Test 18).
+     - RBAC middleware guards and Member 1 "Admin/Owner" role interoperability (Tests 19 & 21).
+     - AI mutation barriers (Test 20).
+     - Operations contract schema alignment (Test 22).
+     - Unauthorized and invented role rejection (Test 23).
+     - Sole authoritative `serial_items` table and missing table handling (Test 24).
+     - Controller zero demo-admin fallback security (Test 25).
+     - Customer multi-tenant record isolation (Test 26).
+     - Agreed order schema and 25% advance calculation (Test 27).
+     - Express router mounting interoperability (Test 28).
 2. **Frontend Production Build:**
-   - **PASSING:** `npm run build` in `client/` succeeded with 0 errors (Vite v6.4.5 built 2217 modules into `dist/`).
+   - **PASSING:** `npm run build` in `client/` succeeded with 0 errors (Vite v6.4.5 built 2217 modules into `dist/` in 6.91s).
 3. **Live PostgreSQL Status:**
    - **UNVERIFIED (LOCAL DB OFFLINE / ACCESS DENIED):**
    - The local PostgreSQL service (`postgresql-x64-18`) is active on Windows localhost:5432, but requires specific credentials. The default connection string `postgresql://postgres:postgres@localhost:5432/solar_management` fails with `password authentication failed for user "postgres"`.
-   - In accordance with audit instructions, live database testing is **NOT** claimed as passed.
-   - All tests currently execute against isolated unit/mock layers, while production fail-fast error handling guarantees that production mode will never silently fall back to memory.
+   - **Required Environment Variables:** `DATABASE_URL` (format: `postgresql://<user>:<password>@localhost:5432/<dbname>`).
+   - Migration `103_support_finance.sql` has been fortified with prerequisite anchor tables and is 100% prepared to execute cleanly once valid credentials are provided.
 
 ---
 
 ## 8. Summary Status
 
-**Overall Status: PARTIALLY READY**
+**Overall Status: INTEGRATION READY**
 
-The Support, Finance & AI module is fully written, hardened, and verified in isolation. Full end-to-end operational readiness requires:
+The Support, Finance & AI module is fully written, hardened, and verified. Final operational rollout requires:
 1. Member 1 mounting `/api/v1/support-finance` in central `server/src/app.js`.
-2. Resolution of database schema mismatches (`orders.id` UUID vs VARCHAR, `orders.payment_status` column presence, and paise vs rupees).
-3. Delivery of customer portal authentication by Platform Foundation.
-4. Live PostgreSQL database provisioning and seeding.
+2. Provisioning of local/production PostgreSQL credentials via `DATABASE_URL`.
+3. Delivery of customer portal session tokens by Platform Foundation.

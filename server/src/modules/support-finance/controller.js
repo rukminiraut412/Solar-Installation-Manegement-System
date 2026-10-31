@@ -90,7 +90,8 @@ export const SupportFinanceController = {
   async getCaseDetail(req, res, next) {
     try {
       const userCtx = getUserContext(req);
-      const caseDetail = await CasesService.getCaseDetail(req.params.id, userCtx.role);
+      const requestingCustomerId = req.user?.customer_id || (userCtx.role === 'Customer' ? userCtx.userId : null);
+      const caseDetail = await CasesService.getCaseDetail(req.params.id, userCtx.role, requestingCustomerId);
       res.json({ success: true, case: caseDetail, data: caseDetail });
     } catch (err) {
       next(err);
@@ -100,6 +101,18 @@ export const SupportFinanceController = {
   async addMessage(req, res, next) {
     try {
       const userCtx = getUserContext(req);
+      const requestingCustomerId = req.user?.customer_id || (userCtx.role === 'Customer' ? userCtx.userId : null);
+      if (requestingCustomerId) {
+        const c = await Repository.getCaseById(req.params.id);
+        if (c && c.customer_id && c.customer_id !== requestingCustomerId) {
+          return res.status(403).json({
+            error: {
+              code: 'FORBIDDEN',
+              message: 'Access denied: You cannot add messages to another customer\'s case'
+            }
+          });
+        }
+      }
       const author_type = (req.user?.customer_id || userCtx.role === 'Customer') ? 'CUSTOMER' : 'SUPPORT';
       const message = await CasesService.addMessage(req.params.id, {
         ...req.body,
@@ -260,7 +273,11 @@ export const SupportFinanceController = {
   async getPaymentRequests(req, res, next) {
     try {
       const requests = await Repository.listPaymentRequests();
-      res.json({ success: true, count: requests.length, requests, data: requests });
+      const customerId = req.user?.customer_id;
+      const filtered = customerId
+        ? requests.filter(r => r.customer_id === customerId)
+        : requests;
+      res.json({ success: true, count: filtered.length, requests: filtered, data: filtered });
     } catch (err) {
       next(err);
     }

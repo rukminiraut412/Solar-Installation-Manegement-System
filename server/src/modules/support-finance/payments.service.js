@@ -67,8 +67,8 @@ export const PaymentsService = {
       throw err;
     }
 
-    // Advance rule: 20% of total order [DEMO baseline per NC-01]
-    let targetPaise = Math.min(Math.round(totalAmount * 0.20), remainingBalance);
+    // Advance rule: 25% of total order [NC-001] agreed contract
+    let targetPaise = Math.min(Math.round(totalAmount * 0.25), remainingBalance);
     if (purpose === 'BALANCE' || purpose === 'FULL') {
       targetPaise = remainingBalance;
     }

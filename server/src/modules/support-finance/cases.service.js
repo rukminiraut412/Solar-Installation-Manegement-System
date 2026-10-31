@@ -123,8 +123,8 @@ export const CasesService = {
     return Repository.listCases({ role, customer_id, status, priority });
   },
 
-  // 3. Get case detail with strict exclusion of internal notes for customers (§9.6, §16.9)
-  async getCaseDetail(caseId, role = 'Admin') {
+  // 3. Get case detail with strict customer isolation and exclusion of internal notes (§9.6, §16.9)
+  async getCaseDetail(caseId, role = 'Admin', requestingCustomerId = null) {
     const c = await Repository.getCaseById(caseId);
     if (!c) {
       const err = new Error(`Case ${caseId} not found`);
@@ -133,7 +133,16 @@ export const CasesService = {
       throw err;
     }
 
-    const isCustomer = role === 'Customer';
+    // Customer Isolation Guard: Customers cannot access other customers' records
+    if (requestingCustomerId && c.customer_id && c.customer_id !== requestingCustomerId) {
+      const err = new Error('Access denied: You do not have permission to view this customer case');
+      err.code = 'FORBIDDEN';
+      err.status = 403;
+      err.statusCode = 403;
+      throw err;
+    }
+
+    const isCustomer = role === 'Customer' || Boolean(requestingCustomerId);
     const messages = await Repository.getMessagesByCaseId(c.id, isCustomer);
     const ticket = await Repository.getServiceTicketByCaseId(c.id);
     let charges = [];
