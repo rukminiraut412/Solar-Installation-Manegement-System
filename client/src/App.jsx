@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './shared/context/AuthContext';
 import Login from './components/auth/Login';
 import Layout from './components/layout/Layout';
 import Dashboard from './components/dashboard/Dashboard';
+import PublicQuotePortal from './features/customer-sales/components/PublicQuotePortal';
 import { Sun } from 'lucide-react';
 
 function MainApp() {
@@ -15,6 +16,11 @@ function MainApp() {
         <span className="text-sm font-semibold tracking-wide">Initializing SunPower Platform...</span>
       </div>
     );
+  }
+
+  // Allow public quote review and digital signing without authentication
+  if (window.location.pathname.includes('/portal/quotes/')) {
+    return <PublicQuotePortal />;
   }
 
   if (!isAuthenticated) {
