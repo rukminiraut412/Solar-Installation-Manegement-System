@@ -7,6 +7,7 @@ import { env } from './config/env.js';
 import { successResponse } from './shared/utils/response.js';
 import { notFoundHandler } from './middleware/notFoundHandler.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import authRouter from './modules/auth/auth.routes.js';
 
 const app = express();
 
@@ -59,6 +60,9 @@ app.get('/api/v1/health', healthCheckHandler);
 
 // API router placeholder for future phases & members
 const apiRouter = express.Router();
+
+// Mount Platform Foundation Auth module
+apiRouter.use('/auth', authRouter);
 
 // Mount API router
 app.use('/api/v1', apiRouter);
