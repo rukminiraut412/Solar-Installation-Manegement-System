@@ -5,7 +5,7 @@
 **API Mount Prefix:** `/api/v1/operations/`  
 **Database Migration Target:** `server/src/db/migrations/102_operations.sql`  
 **Cross-Module Alignment:** Member 1 (Platform Foundation), Member 2 (Customer & Sales), Member 4 (Support & Finance)  
-**Version:** 1.2.0 (Phase 0 Final Integration Review & Alignment)  
+**Version:** 1.3.0 (Phase 0 Final Verification & Integration Hardening)  
 **Status:** Approved for Implementation
 
 ---
@@ -102,26 +102,42 @@ $$\mathbf{Q_{available} = Q_{on\_hand} - Q_{reserved}}$$
 ### 4.1 Advance Payment Gate & Dispatch Eligibility Contract (`[NC-01]`, `[NC-02]`)
 In accordance with cross-module coordination with Member 2 (`docs/contracts/customer-sales.md`) and Member 4 (`docs/contracts/support-finance.md`):
 
-1. **Authoritative Payment Status Source:**
-   - Member 2's `orders` table defines the order status column: `orders.status` (`order_status_enum`: `'PENDING_ADVANCE'`, `'ADVANCE_PAID'`, `'PROCESSING'`, `'DISPATCHED'`, `'COMPLETED'`, `'CANCELLED'`).
-   - Member 2's `orders` table also stores the commercial terms: `advance_required_percent` (NUMERIC(4,2), configurable `[NC-01]`) and `advance_required_amount` (NUMERIC(10,2)).
-   - Member 4's financial engine records payments and updates `orders.status = 'ADVANCE_PAID'` upon successful HMAC signature verification of advance payment.
-   - **Note:** The field `payment_status` is **not** present in `orders`. Operations checks `orders.status` directly.
+1. **Authoritative Payment Status Source & Conflict Resolution Hierarchy:**
+   - Member 2's `orders` table defines:
+     - `orders.payment_status` (`payment_status_enum`: `'PENDING_ADVANCE'`, `'ADVANCE_PAID'`, `'FULLY_PAID'`).
+     - `orders.order_status` (`order_status_enum`: `'CONFIRMED'`, `'IN_FULFILMENT'`, `'COMPLETED'`, `'CANCELLED'`).
+     - Commercial terms: `advance_required_percent` (NUMERIC(4,2), configurable `[NC-01]`), `advance_required_amount` (NUMERIC(10,2)), and `advance_paid_amount` (NUMERIC(10,2)).
+     - *Compatibility Note:* For interoperability across services and test suites, `orders.status` (if aliased or referenced) maps to `orders.order_status`, while financial eligibility evaluates `orders.payment_status`.
+   - Member 4's financial engine records captured transactions in `payments` (`status = 'CAPTURED'`).
+   - **Conflict Resolution Rule:** Member 4's cryptographic payment ledger (`payments` table with `status = 'CAPTURED'` verified via Razorpay HMAC SHA256) is the authoritative financial truth.
+     - *Scenario A (`orders.payment_status == 'PENDING_ADVANCE'`, but `payments` has captured $\sum \text{amount} \ge \text{orders.advance\_required\_amount}$):* Financial truth prevails. Dispatch is permitted, and an automatic reconciliation event advances `orders.payment_status` to `'ADVANCE_PAID'`.
+     - *Scenario B (`orders.payment_status == 'ADVANCE_PAID'`, but no captured payment exists in `payments`):* Anti-fraud integrity check triggers. Dispatch is blocked pending financial reconciliation, unless an explicit Admin override is provided.
 
 2. **Dispatch Eligibility Rule:**
    A warehouse dispatch manifest can be created and confirmed if and only if **any** of the following conditions are met:
-   - **Condition A (Standard Payment):** `orders.status IN ('ADVANCE_PAID', 'PROCESSING', 'DISPATCHED')`.
+   - **Condition A (Standard Payment):** `orders.payment_status IN ('ADVANCE_PAID', 'FULLY_PAID')` AND `orders.order_status != 'CANCELLED'` (or legacy/unified `orders.status IN ('ADVANCE_PAID', 'PROCESSING', 'DISPATCHED')`).
    - **Condition B (Direct Financial Verification):** Member 4's `payments` table shows captured payments (`payments.status = 'CAPTURED'`) where $\sum \text{amount} \ge \text{orders.advance\_required\_amount}$.
    - **Condition C (Admin Exception Override):** An Admin/Owner user explicitly grants a dispatch waiver flag (`advance_payment_override = true`) with a mandatory audit reason.
    - **Condition D (Gate Disabled):** The system setting `enforce_advance_dispatch_gate` is configured to `false` (`[NC-02]`).
 
-3. **Configurable Advance Threshold (`[NC-01]`):**
+3. **Admin Override Audit Requirements:**
+   When an Admin/Owner bypasses the advance payment gate (`advance_payment_override = true`):
+   - The operation **MUST** record an immutable audit entry in `audit_logs` via `recordAuditLog`: `action: 'DISPATCH_PAYMENT_OVERRIDE'`, recording `user_id`, `order_id`, `project_id`, client IP, and timestamp.
+   - A mandatory justification text (`override_reason`, minimum 10 characters) must be supplied in the request body.
+   - The override flag and approving Admin name are stamped on the `dispatch_orders` record and printed on the Delivery Challan PDF.
+
+4. **Preventing Duplicate or Repeated Dispatch Manifest Creation:**
+   - **Database Constraint:** `UNIQUE (order_id)` on active `dispatch_orders` records in status `('DRAFT', 'PACKING', 'DISPATCHED')`.
+   - **Idempotency Gate:** If `POST /api/v1/operations/dispatch/create` is called when an active dispatch order already exists for the project, the API rejects with `409 Conflict` (`DISPATCH_ALREADY_EXISTS`) returning the existing dispatch order ID, preventing duplicate manifests and double-allocations.
+
+5. **Configurable Gate Bypass Audit Trail (`[NC-02]`):**
+   - If `enforce_advance_dispatch_gate` is set to `false` in system settings, creating a dispatch order does **not** silently bypass governance without an audit trail.
+   - The system automatically records an audit event: `DISPATCH_GATE_BYPASSED_BY_CONFIG`, logging the active setting, the user who initiated dispatch, order ID, and project ID.
+
+6. **Configurable Advance Threshold (`[NC-01]`):**
    - `SOLAR_MANAGEMENT_SYSTEM.md` states: *"A customer usually pays an advance, or the full amount, before work starts."*
    - There is **no hardcoded mandatory 25% advance requirement**.
    - The required advance percentage is stored per order in `orders.advance_required_percent` (defaulting to configurable system setting `[DEMO: 25.0%]`, with full-payment 100% options supported).
-
-4. **Enforcement Behavior:**
-   - If an order is in `PENDING_ADVANCE` and no override exists, warehouse operators can view reserved stock, but the "Create Dispatch Manifest" button is disabled and `POST /api/v1/operations/dispatch/create` rejects with `403 Forbidden` (`ADVANCE_PAYMENT_REQUIRED`).
 
 ### 4.2 Project BOM Integration & Handover Flow
 In accordance with Member 2's contract (`docs/contracts/customer-sales.md` §3.5 & §6.2):
@@ -132,25 +148,61 @@ In accordance with Member 2's contract (`docs/contracts/customer-sales.md` §3.5
    - **Stage 3 (Handover Dispatch):** Member 2 triggers the Operations Handover via:
      - Push: `POST /api/v1/operations/projects/handover`
      - Pull: `GET /api/v1/customer-sales/handover/:orderId`
-   - **Stage 4 (Project BOM Creation & Ownership):**
-     - Member 2 owns the commercial quote items (`quotation_items`).
-     - **Member 3 (Operations) creates and owns the physical project BOM table: `project_bom_items`** (defined in `102_operations.sql`).
-     - Upon receiving the handover payload, Operations inserts lines into `project_bom_items`, resolving `products.id` by matching `products.sku = item.sku`.
+   - **Stage 4 (Project BOM Creation, Harmonization & Ownership):**
+     - Member 2 owns the commercial quote derivation (`quotation_items`) and authoritatively records the accepted BOM snapshot into `project_bom_items` upon customer quotation acceptance (defined in `101_customer_sales.sql`).
+     - **Schema Harmonization between Member 2 and Member 3:**
+       - Base commercial snapshot columns provisioned by Member 2 (`101_customer_sales.sql`): `(id, project_id, product_id, category, sku, name, quantity, unit, is_serialized, unit_cost, unit_price, total_price, created_at)`.
+       - Fulfilment tracking columns provisioned/extended by Operations (`102_operations.sql`): `(quantity_reserved, quantity_dispatched, order_id, quantity_required)`.
+       - `quantity` (Member 2's column) and `quantity_required` (Operations' column) are treated as synchronized synonyms: `quantity_required` defaults to `quantity`.
+     - **Dual Ingestion Support:**
+       - *Flow A (Direct Database Handover):* Member 2 writes `project_bom_items` directly upon quotation acceptance, then triggers stock reservation via `POST /api/v1/operations/projects/:id/reserve-stock`.
+       - *Flow B (REST Handover Ingestion):* Member 2 invokes `POST /api/v1/operations/projects/handover` with the frozen BOM lines; Operations validates SKUs against master catalog and upserts/inserts into `project_bom_items`.
+     - In both flows, Operations resolves `products.id` by matching `products.sku = item.sku`.
 
-2. **Fields Operations Needs and Stores in `project_bom_items`:**
+2. **Handling Unmapped SKUs (Strict Rejection):**
+   - When ingesting BOM lines (via REST handover or database reservation), Operations verifies that every line's `sku` exists in `products.sku`.
+   - **No Invention Rule:** Operations **MUST NOT** guess, invent, or map unmapped SKUs to approximate or placeholder products.
+   - If any SKU cannot be resolved, the handover request is strictly rejected with `422 Unprocessable Entity` (`UNMAPPED_BOM_SKU`):
+     ```json
+     {
+       "success": false,
+       "error": {
+         "code": "UNMAPPED_BOM_SKU",
+         "message": "BOM item SKU 'UNKNOWN-SKU-123' does not exist in master product catalog. Handover rejected.",
+         "details": { "unmappedSku": "UNKNOWN-SKU-123" }
+       }
+     }
+     ```
+   - Handover cannot proceed until the master product catalog is provisioned with the valid SKU.
+
+3. **Preventing Duplicate Project BOM Creation (Idempotency):**
+   - The handover endpoint `POST /api/v1/operations/projects/handover` and reservation endpoint `POST /api/v1/operations/projects/:id/reserve-stock` are strictly idempotent.
+   - Database constraint: `UNIQUE (project_id, sku)` on `project_bom_items`.
+   - If a repeated handover request with identical payload is received:
+     - Operations detects existing records for `project_id`.
+     - Returns `200 OK` with `{ status: 'ALREADY_INITIALIZED', projectId, message: 'Project BOM already initialized.' }` without duplicating rows or re-reserving stock.
+     - If the payload conflicts with an existing initialized project, it rejects with `409 Conflict` (`HANDOVER_ALREADY_PROCESSED`).
+
+4. **Preserving the Frozen Quotation BOM Snapshot:**
+   - Member 2's `quotation_items` records the original commercial quotation snapshot at the time the customer accepted.
+   - When `project_bom_items` is created, it locks the frozen snapshot values (`sku`, `category`, `name`, `quantity`, `unit`, `unit_cost`) exactly as accepted.
+   - `project_bom_items` is immutable regarding required quantities: subsequent changes to product catalog prices, supplier costs, or package definitions do **not** alter the locked project BOM.
+
+5. **Fields Operations Needs and Stores in `project_bom_items`:**
    - `id` (UUID v4): Unique allocation line ID.
-   - `project_id` (UUID): Project reference.
-   - `order_id` (UUID): Commercial order reference.
+   - `project_id` (UUID): Project reference (`projects.id`).
+   - `order_id` (UUID): Commercial order reference (`orders.id`).
    - `product_id` (UUID): Internal catalog reference (`products.id`).
    - `sku` (VARCHAR(100)): Product SKU code.
-   - `category` (VARCHAR(50)): Category taxonomy.
+   - `category` (VARCHAR(50)): Category taxonomy (`PANEL`, `INVERTER`, `BATTERY`, etc.).
    - `name` (VARCHAR(255)): Component description.
-   - `quantity_required` (NUMERIC(6,2)): Quantity required by the BOM.
+   - `quantity` / `quantity_required` (NUMERIC(6,2)): Quantity required by the BOM.
    - `quantity_reserved` (NUMERIC(6,2)): Quantity currently locked in warehouse.
    - `quantity_dispatched` (NUMERIC(6,2)): Quantity physically loaded on truck.
+   - `unit` (VARCHAR(20)): Unit of measurement (`PCS`, `METER`, `SET`).
    - `is_serialized` (BOOLEAN): Requires individual serial barcode scanning.
 
-3. **Automated Stock Reservation:**
+6. **Automated Stock Reservation:**
    - For each line in `project_bom_items`, Operations checks `inventory_items.available_quantity`:
      - **Sufficient Stock:** Locks row (`SELECT FOR UPDATE`), increments `reserved_quantity`, creates `stock_reservations`, and logs ledger `RESERVATION`.
      - **Shortage Detected:** Flags project status as `SHORTAGE_FLAGGED`, logs deficit amount, and alerts warehouse management.
@@ -347,9 +399,24 @@ Field technicians execute jobs using a dedicated mobile web interface:
 - **No Manual Typing:** Manual entry of warranty dates into books or registers is strictly prohibited. Expiry dates are calculated via database interval arithmetic:
   $$\text{end\_date} = \text{start\_date} + \text{duration\_months}$$
 
-### 10.2 Warranty Policies: Manufacturer vs Installer (`[NC-04]`, `[NC-20]`)
-- **Dual Policy Modeling (`[NC-04]`):** Modeled in `warranty_records` with `party` (`'Manufacturer'` vs `'Installer'`) and `scope` (`'Full Replacement'`, `'Performance'`, `'Workmanship'`). Installer workmanship default is configurable (demo default: 12 months).
-- **Replacement Unit Warranty (`[NC-20]`):** When a defective component is replaced under warranty, whether the replacement unit inherits the remaining term or restarts coverage is configurable via `system_settings.replacement_warranty_rule` (demo default: `INHERIT`).
+### 10.2 The 18-Month Breakdown Scenario & Verification Contract
+In `SOLAR_MANAGEMENT_SYSTEM.md` (§3 "The rainy season breakdown"), the specification illustrates:
+> *"Eighteen months later, it is pouring and a customer calls: the inverter is showing a fault code and there is zero power. Support should find the customer and the exact inverter serial number within seconds, and see whether it is still under warranty. If it is, the repair or replacement should cost the customer nothing. If not, the parts and labour should be billed automatically. Either way the complaint should be tracked as a ticket until the customer confirms that everything works."*
+
+- **Narrative Analysis & Contract Enforcement:**
+  - The 18-month timeframe illustrates a service ticket logged during the 2-year (24-month) inverter warranty window.
+  - Because 18 months $\le$ 24 months, the component status evaluated by the Operations API is **`WITHIN_PERIOD`** (`status = 'Active'`).
+  - **Authoritative Billing Rule (BR-WRN-002):** Member 4's ticketing engine verifies this status via the Operations warranty interface. Under-warranty service and replacement are billed at **₹0** to the customer.
+  - If a breakdown occurred after month 24 (e.g. 26 months), the status would evaluate to **`EXPIRED`**, and Member 4's engine would automatically generate an itemized bill for parts and labor.
+
+- **Specification-Confirmed Rules vs Configurable `[NC]` Policies:**
+  - **Confirmed Specification Rule:** Warranty starts automatically upon **DELIVERY** without manual register typing.
+  - **Confirmed Specification Rule:** Service for under-warranty equipment costs the customer ₹0.
+  - **Confirmed Specification Rule:** Service for expired equipment automatically bills parts and labor.
+  - **Configurable Policy (`[NC-03]`):** 24-month inverter/battery and 240-month panel terms are specification examples ('for example 2 years... and 20 years for solar panels'). Configurable per product/policy with labeled demo defaults.
+  - **Configurable Policy (`[NC-02]`):** Delivery is the confirmed default start event; customer handover sign-off is a configurable alternative.
+  - **Configurable Policy (`[NC-04]`):** Modeled with both `'Manufacturer'` and `'Installer'` scope (workmanship term configurable, demo default: 12 months).
+  - **Configurable Policy (`[NC-20]`):** Replacement units under warranty inherit remaining term (configurable: inherit vs restart).
 
 ### 10.3 Single Standardized Warranty Query API: `GET /api/v1/operations/warranties/:serialNumber`
 To ensure complete consistency with Member 4's `warranty.adapter.js`, Operations exposes the unified endpoint:
@@ -765,24 +832,39 @@ CREATE INDEX idx_ledger_product ON inventory_ledger(product_id);
 CREATE INDEX idx_ledger_created ON inventory_ledger(created_at);
 ```
 
-#### 3. `project_bom_items` & `stock_reservations` (Operations-Owned Allocation)
+#### 3. `project_bom_items` & `stock_reservations` (Harmonized with Member 2)
 ```sql
+-- Harmonized project_bom_items schema (Jointly aligned: Member 2 commercial snapshot + Member 3 fulfilment)
 CREATE TABLE IF NOT EXISTS project_bom_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id UUID NOT NULL,
-    order_id UUID NOT NULL,
-    product_id UUID NOT NULL REFERENCES products(id),
-    sku VARCHAR(100) NOT NULL,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    order_id UUID,
+    product_id UUID REFERENCES products(id),
     category VARCHAR(50) NOT NULL,
+    sku VARCHAR(100) NOT NULL,
     name VARCHAR(255) NOT NULL,
-    quantity_required NUMERIC(6,2) NOT NULL CHECK (quantity_required > 0),
+    quantity NUMERIC(6,2) NOT NULL CHECK (quantity > 0),
+    quantity_required NUMERIC(6,2),
     quantity_reserved NUMERIC(6,2) NOT NULL DEFAULT 0 CHECK (quantity_reserved >= 0),
     quantity_dispatched NUMERIC(6,2) NOT NULL DEFAULT 0 CHECK (quantity_dispatched >= 0),
+    unit VARCHAR(20) NOT NULL DEFAULT 'PCS',
     is_serialized BOOLEAN NOT NULL DEFAULT false,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    unit_cost NUMERIC(10,2) NOT NULL DEFAULT 0,
+    unit_price NUMERIC(10,2) NOT NULL DEFAULT 0,
+    total_price NUMERIC(10,2) NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, sku) -- Prevents duplicate BOM allocations per project
 );
-CREATE INDEX idx_bom_items_project ON project_bom_items(project_id);
-CREATE INDEX idx_bom_items_order ON project_bom_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_bom_items_project ON project_bom_items(project_id);
+CREATE INDEX IF NOT EXISTS idx_bom_items_order ON project_bom_items(order_id);
+
+-- Idempotent enhancement in 102_operations.sql if table was created in 101_customer_sales.sql
+ALTER TABLE project_bom_items 
+    ADD COLUMN IF NOT EXISTS order_id UUID,
+    ADD COLUMN IF NOT EXISTS quantity_required NUMERIC(6,2),
+    ADD COLUMN IF NOT EXISTS quantity_reserved NUMERIC(6,2) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS quantity_dispatched NUMERIC(6,2) NOT NULL DEFAULT 0;
+UPDATE project_bom_items SET quantity_required = quantity WHERE quantity_required IS NULL AND quantity IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS stock_reservations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -832,7 +914,39 @@ CREATE TABLE IF NOT EXISTS serial_item_audit (
 );
 ```
 
-#### 5. `technicians`, `installation_jobs` & Testing
+#### 5. `dispatch_orders` & `dispatch_items`
+```sql
+CREATE TABLE IF NOT EXISTS dispatch_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL,
+    order_id UUID NOT NULL UNIQUE, -- Prevents duplicate active dispatch manifests per order
+    vehicle_number VARCHAR(50) NOT NULL,
+    driver_name VARCHAR(100) NOT NULL,
+    driver_phone VARCHAR(20) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'PACKING', 'DISPATCHED', 'DELIVERED', 'CANCELLED')),
+    advance_payment_override BOOLEAN NOT NULL DEFAULT false,
+    override_reason TEXT,
+    override_approved_by UUID REFERENCES users(id),
+    dispatched_at TIMESTAMPTZ,
+    delivered_at TIMESTAMPTZ,
+    challan_pdf_url TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dispatch_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    dispatch_id UUID NOT NULL REFERENCES dispatch_orders(id) ON DELETE CASCADE,
+    bom_item_id UUID NOT NULL REFERENCES project_bom_items(id),
+    product_id UUID NOT NULL REFERENCES products(id),
+    serial_item_id UUID REFERENCES serial_items(id),
+    quantity NUMERIC(6,2) NOT NULL CHECK (quantity > 0),
+    is_scanned BOOLEAN NOT NULL DEFAULT false,
+    scanned_at TIMESTAMPTZ
+);
+```
+
+#### 6. `technicians`, `installation_jobs` & Testing
 ```sql
 CREATE TABLE IF NOT EXISTS technicians (
     id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -901,7 +1015,7 @@ CREATE TABLE IF NOT EXISTS installation_handover (
 );
 ```
 
-#### 6. `warranty_records` (Agreed Schema Matching Member 4's Adapter)
+#### 7. `warranty_records` (Agreed Schema Matching Member 4's Adapter)
 ```sql
 CREATE TABLE IF NOT EXISTS warranty_records (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -968,14 +1082,14 @@ flowchart TD
 
 ### 15.1 Inbound Dependencies from Member 2 (Customer & Sales)
 Cross-referenced directly against `docs/contracts/customer-sales.md`:
-- **`orders` table:** Operations reads `orders.id`, `orders.order_number`, `orders.status` (`order_status_enum`), `orders.advance_required_percent`, and `orders.advance_required_amount`.
+- **`orders` table:** Operations reads `orders.id`, `orders.order_number`, `orders.payment_status` (`payment_status_enum`), `orders.order_status` (`order_status_enum`), `orders.advance_required_percent`, and `orders.advance_required_amount`.
+- **`project_bom_items` table:** Jointly harmonized. Created by Member 2 upon quotation acceptance with base snapshot items; extended/consumed by Operations for reservation and dispatch fulfilment.
 - **Handover API Contract:** Operations exposes `POST /api/v1/operations/projects/handover` and consumes Member 2's `GET /api/v1/customer-sales/handover/:orderId` to receive the frozen BOM items.
-- **BOM Ingestion:** Member 2 owns `quotation_items`; Operations receives the handover payload and creates/manages `project_bom_items` in `102_operations.sql`.
 - **Site Survey Measurements:** Informs roof mounting structure bracket types and DC cable length adjustments.
 
 ### 15.2 Inbound Dependencies from Member 4 (Finance & Support)
 Cross-referenced directly against `docs/contracts/support-finance.md`:
-- **Advance Payment Verification Gate:** Dispatch initialization checks `orders.status IN ('ADVANCE_PAID', 'PROCESSING', 'DISPATCHED')` or verifies `payments.status = 'CAPTURED'` with $\sum \text{amount} \ge \text{orders.advance\_required\_amount}$.
+- **Advance Payment Verification Gate:** Dispatch initialization checks `orders.payment_status IN ('ADVANCE_PAID', 'FULLY_PAID')` AND `orders.order_status != 'CANCELLED'` (or directly verifies `payments.status = 'CAPTURED'` with $\sum \text{amount} \ge \text{orders.advance\_required\_amount}$).
 
 ### 15.3 Outbound Deliverables to Member 4 (Finance, Support & Analytics)
 - **Direct Database Interface (Agreed Query):** Member 4's `server/src/modules/support-finance/warranty.adapter.js` directly queries:
@@ -1038,8 +1152,10 @@ In strict compliance with architectural guidelines, unspecified decisions are ex
 | 1 kW to 5 kW On-Grid & Off-Grid BOM Tracking | §2, §7.3 | Master Catalog & BOM reservation with capacity validation | **COMPLIANT** |
 | Double-entry stock ledger | §7.3 | Immutable `inventory_ledger` with 8 transaction types | **COMPLIANT** |
 | Stock reservation does not reduce on-hand | §7.3 | $Q_{available} = Q_{on\_hand} - Q_{reserved}$; on-hand reduced only at dispatch | **COMPLIANT** |
-| Advance payment prerequisite for dispatch | §7.3, §17 | Checks `orders.status IN ('ADVANCE_PAID', 'PROCESSING')` or override (`[NC-01]`) | **COMPLIANT** |
+| Advance payment prerequisite for dispatch | §7.3, §17 | Checks `orders.payment_status IN ('ADVANCE_PAID', 'FULLY_PAID')` or override (`[NC-01]`) | **COMPLIANT** |
 | Project BOM integration & Handover | §3.5, §7.3 | Handover API consumes `quotation_items`, creates `project_bom_items` | **COMPLIANT** |
+| Unmapped SKU rejection | §4.2 | Rejects with `422 Unmapped BOM SKU`; no guessing or invented mappings | **COMPLIANT** |
+| Duplicate dispatch prevention | §4.1, §13 | Database unique constraint on active dispatches per order (`409 Conflict`) | **COMPLIANT** |
 | Mandatory barcode/QR serial scanning | §3, §7.3 | Dispatch confirmation blocked until 100% serialized items scanned | **COMPLIANT** |
 | Global serial number uniqueness | §7.3 | Database unique constraint on `serial_items.serial_number` | **COMPLIANT** |
 | 360-degree serial traceability | §3, §7.3 | `GET /api/v1/operations/serials/:serialNumber/trace` (< 2s response) | **COMPLIANT** |
