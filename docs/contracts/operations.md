@@ -1,32 +1,33 @@
 # Operations, Inventory & Fulfilment Contract Specification
 **Project:** Solar Installation Management System (SunPower Solutions)  
 **Author:** Member 3 — Operations & Fulfilment Lead  
-**Module Scope:** Products, Inventory, Reservations, Dispatch, Serial Registry, Technician Crew Scheduling, Rooftop Installation, Testing, Photo Proof, Handover Signature, Warranty Activation  
+**Module Scope:** Products, Inventory, Double-Entry Stock Ledger, Reservations, Dispatch, Serial Item Registry, Technician Crew Scheduling, Rooftop Installation, Electrical Safety Testing, Photo Proof, Handover Signature, Warranty Activation  
 **API Mount Prefix:** `/api/v1/operations/`  
 **Database Migration Target:** `server/src/db/migrations/102_operations.sql`  
-**Version:** 1.0.0  
-**Status:** Approved for Implementation (Phase 0 Contract)
+**Cross-Module Alignment:** Member 1 (Platform Foundation), Member 2 (Sales & Projects), Member 4 (Support & Finance)  
+**Version:** 1.1.0 (Phase 0 Contract Review & Correction)  
+**Status:** Approved for Implementation
 
 ---
 
 ## 1. Products & Master Catalog Management
 
-### 1.1 Product Categories Taxonomy
-SunPower Solutions operates across seven core product categories that support rooftop systems between 1 kW and 5 kW (both On-Grid and Off-Grid):
-- `PANEL`: Monocrystalline & Polycrystalline Solar PV Modules (e.g., 540W Mono PERC).
-- `INVERTER`: Grid-tied string inverters (1 kW to 5 kW) and hybrid inverters.
-- `BATTERY`: Deep-cycle solar storage units (e.g., 48V 150Ah Lithium/Lead-Acid for Off-Grid packages).
-- `CHARGE_CONTROLLER`: MPPT Solar Charge Controllers for battery voltage regulation.
-- `STRUCTURE`: Rooftop mounting stands, aluminium rails, mid/end clamps, anchor fasteners.
-- `ELECTRICAL`: DC/AC distribution boxes (DB), MCBs, SPDs, solar DC cables (4 sq mm / 6 sq mm), conduits.
-- `EARTHING`: Chemical earthing electrodes, copper-bonded ground rods, earthing pit compound, lightning arrestors.
+### 1.1 Product Categories Taxonomy (7 Standard Categories)
+SunPower Solutions operates across seven core product categories that support rooftop systems between 1 kW and 5 kW (both On-Grid and Off-Grid). The documented list and the database definitions are in 100% agreement:
+1. `PANEL`: Monocrystalline & Polycrystalline Solar PV Modules (e.g., 540W Mono PERC).
+2. `INVERTER`: Grid-tied string inverters (1 kW to 5 kW) and hybrid inverters.
+3. `BATTERY`: Deep-cycle solar storage units (e.g., 48V 150Ah Lithium/Lead-Acid for Off-Grid packages).
+4. `CHARGE_CONTROLLER`: MPPT Solar Charge Controllers for battery voltage regulation.
+5. `STRUCTURE`: Rooftop mounting stands, aluminium rails, mid/end clamps, anchor fasteners.
+6. `ELECTRICAL`: DC/AC distribution boxes (DB), MCBs, SPDs, solar DC cables (4 sq mm / 6 sq mm), conduits.
+7. `EARTHING`: Chemical earthing electrodes, copper-bonded ground rods, earthing pit compound, lightning arrestors.
 
 ### 1.2 Serialization Rules
 - High-value hardware components **MUST** be marked `is_serialized = true`:
   - Every `INVERTER` (High value, individual warranty tracking).
   - Every `BATTERY` (High value, cycle life, individual warranty tracking).
   - Every `CHARGE_CONTROLLER` (High value component).
-- `PANEL` units are serialized in demo seed data (`[NC-17]`), but optional for bulk tracking.
+- `PANEL` units are serialized in demo seed data (`[NC-17]`), but serialization scope is configurable per product.
 - Structural hardware, wires, conduits, and earthing kits are tracked strictly by quantity (`is_serialized = false`).
 
 ### 1.3 Master Catalog Attributes
@@ -34,7 +35,7 @@ Each product record defines:
 - `id` (UUID v4): Unique product identifier.
 - `sku` (VARCHAR(50), UNIQUE): Standardized SKU code (e.g., `INV-ONGRID-3KW-GROW`, `BAT-LITH-48V-150AH`, `PNL-MONO-540W`).
 - `name` (VARCHAR(255)): Commercial name of the product.
-- `category` (ENUM): Product category taxonomy.
+- `category_id` (VARCHAR(50)): One of the 7 standard categories (References `product_categories.id`).
 - `brand` (VARCHAR(100)): Manufacturer name (e.g., Growatt, Deye, Waaree, Luminous).
 - `model` (VARCHAR(100)): Manufacturer model number.
 - `specifications` (JSONB): Structured electrical/physical specs (rated capacity, input voltage window, dimensions, weight).
@@ -98,14 +99,15 @@ $$\mathbf{Q_{available} = Q_{on\_hand} - Q_{reserved}}$$
 
 ## 4. Stock Reservation, Shortage Handling & Warehouse Dispatch Protocol
 
-### 4.1 Advance Payment Gate for Dispatch
+### 4.1 Advance Payment Gate for Dispatch (`[NC-01]`)
 - **BR-PAY-001 Enforcement:** No warehouse packing order or dispatch order may be scheduled until Member 4 confirms that advance payment has been received (`orders.payment_status IN ('ADVANCE_PAID', 'FULLY_PAID')`).
+- **Policy Rule (`[NC-01]`):** `SOLAR_MANAGEMENT_SYSTEM.md` states: *"A customer usually pays an advance, or the full amount, before work starts."* The exact required threshold (percentage or fixed advance amount) is configurable via `system_settings.advance_dispatch_threshold_pct` (with a labeled demo default of 25%), or waived via explicit Admin exception override.
 - If an order is in `PENDING_ADVANCE`, warehouse operators can view reserved parts, but the "Create Dispatch Manifest" button is disabled in the UI and rejected with `403 Forbidden` (`ADVANCE_PAYMENT_REQUIRED`) at the API layer.
 
 ### 4.2 Automated BOM Stock Reservation Flow
 1. Customer digitally accepts quotation (Triggered by Member 2 via `POST /api/v1/operations/projects/:id/reserve-stock`).
 2. The Operations engine loads the complete project Bill of Materials (`project_bom_items`).
-3. For each BOM line item, the engine checks `product_inventory.available_quantity`:
+3. For each BOM line item, the engine checks `inventory_items.available_quantity`:
    - **Case A (Sufficient Stock):** Executes atomic transaction locking stock rows (`SELECT FOR UPDATE`), increments `reserved_quantity`, creates `stock_reservations` records, and logs ledger `RESERVATION`.
    - **Case B (Shortage Detected):** If $Q_{required} > Q_{available}$ for any single item, the system flags the project as `SHORTAGE_FLAGGED`, records the exact deficit amount, and generates an automated procurement task for warehouse management.
 
@@ -118,7 +120,7 @@ $$\mathbf{Q_{available} = Q_{on\_hand} - Q_{reserved}}$$
 - **BR-INV-002 Enforcement:** The truck cannot depart with unscanned or mismatched serial numbers.
 - For every serialized item in the BOM (e.g., 1x 3.3 kW Inverter, 1x 48V Battery):
   1. Warehouse operator scans physical barcode/QR code using tablet camera or handheld scanner.
-  2. The system verifies that the scanned serial exists in `serial_registry` with status `IN_WAREHOUSE`.
+  2. The system verifies that the scanned serial exists in `serial_items` with status `IN_WAREHOUSE`.
   3. The system confirms the serial matches the exact product SKU specified in the BOM.
   4. The system validates that the serial is not assigned to any other project.
 - The `POST /api/v1/operations/dispatch/:id/confirm` endpoint validates that `COUNT(scanned_serials) == COUNT(required_serialized_items)`. If any unit is unscanned, the endpoint rejects with `400 Bad Request` (`INCOMPLETE_SERIAL_SCANS`).
@@ -126,19 +128,21 @@ $$\mathbf{Q_{available} = Q_{on\_hand} - Q_{reserved}}$$
 ### 4.5 Dispatch Departure & Transit State
 - Upon successful validation of all scanned serials:
   1. `dispatch_orders.status` transitions to `DISPATCHED`.
-  2. `serial_registry.status` transitions to `IN_TRANSIT` with `project_id` and `dispatch_id` locked.
+  2. `serial_items.status` transitions to `IN_TRANSIT` with `project_id` and `dispatch_id` locked.
   3. Physical on-hand stock and reserved stock decrement in `inventory_items`.
   4. Immutable ledger transaction logged: `DISPATCH`.
   5. System generates a downloadable Delivery Challan PDF with complete serialized equipment manifest.
 
 ---
 
-## 5. Serial Number Registry, Uniqueness & 360-Degree Traceability
+## 5. Serial Number Tracking, Uniqueness & 360-Degree Traceability
 
-### 5.1 Global Uniqueness Guarantee
-- **BR-INV-003 Enforcement:** Every serial number is uniquely constrained at the database layer: `UNIQUE (serial_number)`.
-- Re-registering an existing serial number on inbound GRN fails with `409 Conflict`.
-- Assigning a serial number to two concurrent active projects is physically impossible.
+### 5.1 Shared Table Agreement: `serial_items`
+To ensure 100% interoperability with Member 4 (Support & Finance) without silent naming collisions:
+- The authoritative PostgreSQL table name is **`serial_items`** (with primary key `id UUID`, unique column `serial_number`, foreign key `product_id`).
+- Foreign keys across all modules reference `serial_item_id REFERENCES serial_items(id)`.
+- For backwards-compatibility and semantic reporting, a database view `serial_registry` is defined as `SELECT * FROM serial_items`.
+- Global uniqueness constraint: `UNIQUE (serial_number)`. Re-registering an existing serial number on inbound GRN fails with `409 Conflict`.
 
 ### 5.2 Serial Number Lifecycle States
 ```mermaid
@@ -180,18 +184,18 @@ Any staff member (Support, Warehouse, Sales, Director) can query a serial number
   - Returns note logged with reason code (`TRANSIT_DAMAGE`, `SITE_REJECTION`, `DEFECTIVE_COMPONENT`, `SPEC_MISMATCH`).
   - Serial number unlinked from customer project and marked `RETURNED_TO_WAREHOUSE` or `DAMAGED_QUARANTINE`.
 
-### 6.3 Physical Stock Corrections & Auditing
+### 6.3 Physical Stock Corrections & Auditing (`[NC-23]`)
 - When physical bin count differs from ledger on-hand balance:
   - Warehouse operator submits `POST /api/v1/operations/inventory/corrections`.
   - Captures: `product_id`, `system_qty`, `counted_qty`, `variance`, `reason_code` (`BREAKAGE`, `MISCOUNT`, `PILFERAGE`, `SAMPLE`).
-  - **Approval Gate:** Variances exceeding ₹2,000 require explicit Director/Admin digital approval before ledger is updated (`[NC-23]`).
+  - **Approval Gate (`[NC-23]`):** Threshold requiring Director/Admin digital approval is configurable (demo default: variance $> ₹2,000$). Stock reservations do not expire automatically.
 
 ---
 
 ## 7. 15-Technician Roster, Skill Profiles, Availability & Crew Scheduling
 
 ### 7.1 Roster Profiles & Skill Taxonomy
-SunPower Solutions employs a core field team of 15 technicians. Each technician profile contains:
+SunPower Solutions employs a core field team of 15 technicians (authoritative company fact from `SOLAR_MANAGEMENT_SYSTEM.md` §2.1). Each technician profile contains:
 - `id` (UUID v4): References platform `users.id`.
 - `skills` (TEXT[]): Specific competencies:
   - `ELECTRICAL_LEAD`: Certified to wire AC/DC distribution boxes, connect inverters, and conduct generation tests.
@@ -199,15 +203,16 @@ SunPower Solutions employs a core field team of 15 technicians. Each technician 
   - `SOLAR_PV`: Panel stringing, MC4 crimping, DC cable routing.
   - `HELPER`: Material staging, cable pulling, roof safety assistance.
 - `certifications` (JSONB): Electrical wireman license details, working-at-height training validity.
-- `daily_hourly_rate` (NUMERIC(10,2)): Internal cost rate for job profitability calculations (Confidential).
+- `daily_hourly_rate` (NUMERIC(10,2)): Internal cost rate for job profitability calculations (Confidential `[NC-07]`).
 - `employment_type` (ENUM): `FULL_TIME`, `CONTRACTOR`.
 - `status` (ENUM): `ACTIVE`, `ON_LEAVE`, `INACTIVE`.
 
-### 7.2 Crew Composition & Business Rules
-- **Crew Size:** Standard rooftop installations (1 kW to 5 kW) require a crew of 2 to 3 technicians.
-- **Mandatory Electrical Lead:** Every installation crew **MUST** have at least one technician designated with the `ELECTRICAL_LEAD` skill. The API strictly blocks scheduling if no electrical lead is present.
+### 7.2 Crew Composition & Business Rules (`[NC-12]`, `[NC-31]`)
+- **Crew Size (`[NC-31]`):** Rooftop installations typically utilize 2 to 3 technicians. The recommended minimum crew size is configurable (demo default: 2 technicians).
+- **Mandatory Electrical Lead:** Every installation crew **MUST** have at least one technician designated with the `ELECTRICAL_LEAD` skill. The API blocks scheduling if no electrical lead is present.
 - **Conflict Prevention:** A technician cannot be assigned to two concurrent site surveys or installation jobs on overlapping dates.
-- **Leave Management:** The scheduling calendar cross-references approved leave periods and highlights unavailable technicians.
+- **Assignment Approval (`[NC-12]`):** Configurable whether Admin approval is required for every technician assignment (setting `require_admin_approval_for_assignment`, demo default: `false`).
+- **Payroll Tracking (`[NC-07]`):** Hours worked $\times$ hourly rate tracking only; payroll tax deductions and statutory filings are out-of-scope.
 
 ---
 
@@ -226,8 +231,8 @@ SunPower Solutions employs a core field team of 15 technicians. Each technician 
     ├── [FAILED] ──► [REWORK_REQUIRED] (Punch-list logged, rework scheduled)
     ▼ [PASSED]
 [PHOTO_PENDING] 
-    │ (Upload 4 mandatory installation angles)
-    ▼ [4 PHOTOS VERIFIED]
+    │ (Upload mandatory installation angles)
+    ▼ [MANDATORY PHOTOS VERIFIED]
 [HANDOVER_PENDING] 
     │ (Customer inspects system and signs touch screen)
     ▼ [CUSTOMER SIGNED]
@@ -248,26 +253,27 @@ Field technicians execute jobs using a dedicated mobile web interface:
 
 ---
 
-## 9. Installation Testing, Mandatory 4-Angle Photo Proof & Customer Handover Sign-Off
+## 9. Installation Testing, Mandatory Photo Proof & Customer Handover Sign-Off
 
-### 9.1 Power Generation & Electrical Safety Testing Gate
-- **BR-OPS-002 Enforcement:** Before customer sign-off is unlocked, technicians must execute electrical tests and record instrument readings:
-  - **Grid Voltage:** 210V to 250V AC (Must be within normal single-phase operating window).
+### 9.1 Power Generation & Electrical Safety Testing Gate (`[NC-29]`)
+- **BR-OPS-002 Enforcement:** `SOLAR_MANAGEMENT_SYSTEM.md` mandates: *"They test that power is being generated, then open a simple form on their phone or tablet."* Technicians must execute electrical tests and record instrument readings before handover sign-off is unlocked:
+  - **Grid Voltage:** 210V to 250V AC (Standard single-phase operating window).
   - **Solar Array Open Circuit Voltage ($V_{oc}$):** Must be $> 0.0\text{ V}$.
-  - **Active Inverter Power Generation:** Must be $> 0.00\text{ kW}$ (Confirmed during daylight hours).
-  - **Earthing Pit Resistance:** **STRICTLY $\le 5.0\ \mathbf{\Omega}$**. (Threshold established in specification).
-- **Rework Exception:** If earthing resistance $> 5.0\ \Omega$ or generation fails, `installation_tests.status` is set to `FAILED`, the job transitions to `REWORK_REQUIRED`, and handover is blocked.
+  - **Active Inverter Power Generation:** Must be $> 0.00\text{ kW}$ (Confirmed during daylight hours, required by spec).
+  - **Earthing Pit Resistance (`[NC-29]`):** Configurable safety limit with demo default **$\le 5.0\ \mathbf{\Omega}$**.
+- **Rework Exception:** If earthing resistance exceeds threshold or power generation is zero, `installation_tests.status` is set to `FAILED`, the job transitions to `REWORK_REQUIRED`, and handover is blocked.
 
-### 9.2 Mandatory 4-Angle Photo Proof Upload via Cloudinary
-- **BR-OPS-004 Enforcement:** Handover sign-off is **STRICTLY LOCKED** until verified photographs for all 4 mandatory angles are uploaded directly to Cloudinary:
+### 9.2 Mandatory Photo Proof Upload via Cloudinary (`[NC-30]`)
+- **BR-OPS-004 Enforcement:** `SOLAR_MANAGEMENT_SYSTEM.md` mandates: *"upload photos of the finished roof."* Handover sign-off is **STRICTLY LOCKED** until verified photographs for all mandatory categories are uploaded directly to Cloudinary:
   1. `STRUCTURE_AND_PANELS`: Full rooftop perspective showing mounted panels and rail alignments.
   2. `INVERTER_AND_WIRING`: Inverter display, DC/AC breaker boxes, safety caution labels.
   3. `BATTERY_AND_CONTROLLER`: Battery storage bank and charge controller (or main disconnect switch for On-Grid).
   4. `EARTHING_PIT`: Earthing pit chamber, inspection cover, ground bond clamp.
-- Photos are uploaded directly from mobile browsers to Cloudinary using Member 1's shared `/api/v1/media/sign-upload` utility, saving bandwidth and backend memory.
+- The minimum required photo count and categories are configurable (`[NC-30]`, demo default: 4 distinct angles).
+- Direct upload to Cloudinary uses Member 1's shared `/api/v1/media/sign-upload` utility.
 
 ### 9.3 Customer Digital Handover Signature Gate
-- **BR-OPS-005 Enforcement:** An installation job cannot be marked `COMPLETED` without the homeowner's digital signature.
+- **BR-OPS-005 Enforcement:** `SOLAR_MANAGEMENT_SYSTEM.md` mandates: *"The homeowner signs on the screen to accept the work. The company should have clear proof of the job, and the customer should have no doubt about what was installed."*
 - **Workflow:**
   1. Homeowner inspects installation with lead technician.
   2. Technician presents touch device displaying system capacity, serial numbers, test readings, and completion checklist.
@@ -279,25 +285,94 @@ Field technicians execute jobs using a dedicated mobile web interface:
 
 ## 10. Warranty Lifecycle, Automated Activation, Expiry & Claims Verification
 
-### 10.1 Automated Warranty Clock Activation
-- **BR-WRN-001 Enforcement:** The moment an installation job reaches `COMPLETED` status, the system **automatically** activates warranty records for every serial number installed on the project.
-- **Specification Durations (Authoritative):**
+### 10.1 Automated Warranty Clock Activation (`[NC-02]`, `[NC-03]`)
+- **BR-WRN-001 Enforcement:** `SOLAR_MANAGEMENT_SYSTEM.md` mandates: *"The moment a delivery is done, the warranty clock should start by itself for every serial number: for example 2 years for an inverter or battery, and 20 years for solar panels. No one should have to type dates into a register."*
+- **Warranty Start Event (`[NC-02]`):** Configurable between `DELIVERY` and `HANDOVER` (demo default: `HANDOVER`, when commissioning is signed).
+- **Warranty Durations (`[NC-03]`):** Example values in specification are configured as demo defaults:
   - **Solar PV Modules:** **20 Years (240 Months)** performance warranty.
-  - **Inverter:** **2 Years (24 Months)** manufacturer replacement warranty `[NC-03]`.
-  - **Battery Storage:** **2 Years (24 Months)** replacement/cycle warranty `[NC-03]`.
-- **Clock Start Event:** Default starts on delivery / completion date (`warranty_start_event = DELIVERY_OR_HANDOVER`).
+  - **Inverter:** **2 Years (24 Months)** manufacturer replacement warranty.
+  - **Battery Storage:** **2 Years (24 Months)** replacement/cycle warranty.
+  - Duration is stored per product/policy and is fully configurable.
 - **No Manual Typing:** Manual entry of warranty dates into books or registers is strictly prohibited. Expiry dates are calculated via database interval arithmetic:
   $$\text{end\_date} = \text{start\_date} + \text{duration\_months}$$
 
-### 10.2 Warranty Claims & Service Verification Interface (For Member 4)
-When a customer calls Support reporting a breakdown (e.g., 18 months post-install, inverter showing fault code):
-- Support agent enters customer phone or inverter serial number.
-- Operations API provides `GET /api/v1/operations/warranty/:serialNumber`:
-  - Returns `status`: `UNDER_WARRANTY` or `EXPIRED`.
-  - Returns `daysRemaining`, `policyTerms`, `warrantyType` (`MANUFACTURER` vs `INSTALLER` `[NC-04]`).
-- **Automated Service Cost Contract (BR-WRN-002):**
-  - If `UNDER_WARRANTY`: Replacement hardware and labor are priced at **₹0** to the customer.
-  - If `EXPIRED`: Support ticketing engine automatically generates an itemized payable quote for parts and labor.
+### 10.2 Warranty Policies: Manufacturer vs Installer (`[NC-04]`, `[NC-20]`)
+- **Dual Policy Modeling (`[NC-04]`):** Modeled in `warranty_records` with `party` (`'Manufacturer'` vs `'Installer'`) and `scope` (`'Full Replacement'`, `'Performance'`, `'Workmanship'`). Installer workmanship default is configurable (demo default: 12 months).
+- **Replacement Unit Warranty (`[NC-20]`):** When a defective component is replaced under warranty, whether the replacement unit inherits the remaining term or restarts coverage is configurable via `system_settings.replacement_warranty_rule` (demo default: `INHERIT`).
+
+### 10.3 Single Standardized Warranty Query API: `GET /api/v1/operations/warranties/:serialNumber`
+To ensure complete consistency with Member 4's `warranty.adapter.js`, Operations exposes the unified endpoint:
+
+#### Request
+- **Method:** `GET`
+- **Path:** `/api/v1/operations/warranties/:serialNumber`
+- **Headers:** `Authorization: Bearer <token>`
+- **URL Params:** `serialNumber` (string, required, case-insensitive)
+- **Query Params:** `claimDate` (ISO date string `YYYY-MM-DD`, optional, defaults to current date)
+
+#### Successful Response (200 OK)
+```json
+{
+  "success": true,
+  "message": "Warranty record retrieved successfully",
+  "data": {
+    "serialNumber": "INV-GROW-3K-26-00104",
+    "warrantyCode": "WRN-INV-2026-00104",
+    "productName": "Growatt 3.3kW On-Grid String Inverter",
+    "productId": "4a71d620-3b1a-4d22-b5e1-95fae22a1001",
+    "customerId": "8f12c340-9a2b-4e11-c3f2-12aeb44c3003",
+    "projectId": "7e01b230-8a1a-4d00-b2e1-01aeb33b2002",
+    "status": "WITHIN_PERIOD",
+    "durationMonths": 24,
+    "startDate": "2026-11-02",
+    "endDate": "2028-11-02",
+    "remainingDays": 550,
+    "remainingMonths": 18.1,
+    "party": "Manufacturer",
+    "scope": "Full Replacement",
+    "termsSummary": "Manufacturer replacement warranty covering inverter circuit defects.",
+    "isAuthoritativeDB": true
+  }
+}
+```
+
+#### Status Enumeration
+- `WITHIN_PERIOD`: Active warranty coverage; customer repair/replacement is billed at **₹0** (BR-WRN-002).
+- `EXPIRED`: Warranty duration has elapsed; Member 4 auto-bills parts and labor.
+- `VOID`: Warranty voided by administration due to unauthorized tampering or physical damage.
+- `NOT_ACTIVE`: Start date is in the future.
+
+#### Error Responses
+- **400 Bad Request:**
+  ```json
+  {
+    "success": false,
+    "error": {
+      "code": "INVALID_SERIAL_NUMBER",
+      "message": "Serial number parameter is required and cannot be empty."
+    }
+  }
+  ```
+- **404 Not Found:**
+  ```json
+  {
+    "success": false,
+    "error": {
+      "code": "WARRANTY_NOT_FOUND",
+      "message": "No warranty contract found for serial number 'INV-UNKNOWN-999'."
+    }
+  }
+  ```
+- **500 Internal Server Error:**
+  ```json
+  {
+    "success": false,
+    "error": {
+      "code": "DATABASE_ERROR",
+      "message": "Failed to query warranty registry."
+    }
+  }
+  ```
 
 ---
 
@@ -319,7 +394,7 @@ When a customer calls Support reporting a breakdown (e.g., 18 months post-instal
 | `GET` | `/api/v1/operations/inventory/ledger` | Admin/Owner, Warehouse | Immutable double-entry inventory ledger transaction history |
 | `POST` | `/api/v1/operations/inventory/receipts` | Admin/Owner, Warehouse | Record Inbound Goods Received Note (GRN) with vendor bill reference |
 | `GET` | `/api/v1/operations/inventory/shortages` | Admin/Owner, Warehouse, Sales | Active shortage alerts for accepted customer orders |
-| `POST` | `/api/v1/operations/inventory/corrections` | Admin/Owner, Warehouse | Submit physical count variance adjustment (Admin approval gated) |
+| `POST` | `/api/v1/operations/inventory/corrections` | Admin/Owner, Warehouse | Submit physical count variance adjustment (Admin approval gated `[NC-23]`) |
 
 ### 11.3 Project Stock Reservation & Shortage Alerts
 | Method | Endpoint | RBAC Access | Description |
@@ -328,17 +403,17 @@ When a customer calls Support reporting a breakdown (e.g., 18 months post-instal
 | `DELETE` | `/api/v1/operations/projects/:id/reserve-stock` | Admin/Owner, Warehouse | Release reserved stock back to available pool upon order cancellation |
 | `GET` | `/api/v1/operations/projects/:id/reservation-status` | Admin/Owner, Warehouse, Sales | View reservation fulfillment status and assigned serial numbers |
 
-### 11.4 Serial Number Registry & Barcode Verification
+### 11.4 Serial Items Registry & Barcode Verification
 | Method | Endpoint | RBAC Access | Description |
 |---|---|---|---|
-| `POST` | `/api/v1/operations/serials/batch` | Admin/Owner, Warehouse | Bulk register inbound serial numbers from vendor delivery |
+| `POST` | `/api/v1/operations/serials/batch` | Admin/Owner, Warehouse | Bulk register inbound serial items from vendor delivery |
 | `GET` | `/api/v1/operations/serials/:serialNumber/trace` | All Staff Roles | 360-degree serial number lookup (Receipt $\to$ Project $\to$ Install $\to$ Warranty) |
 | `POST` | `/api/v1/operations/dispatch/:id/verify-serial` | Admin/Owner, Warehouse | Scan and attach a serial number to a dispatch order |
 
 ### 11.5 Dispatch & Delivery Management
 | Method | Endpoint | RBAC Access | Description |
 |---|---|---|---|
-| `POST` | `/api/v1/operations/dispatch/create` | Admin/Owner, Warehouse | Initialize dispatch packing manifest (Advance payment prerequisite enforced) |
+| `POST` | `/api/v1/operations/dispatch/create` | Admin/Owner, Warehouse | Initialize dispatch packing manifest (Advance payment prerequisite enforced `[NC-01]`) |
 | `GET` | `/api/v1/operations/dispatch/:id` | Admin/Owner, Warehouse, Tech | Get dispatch details, driver info, and scanned serial checklist |
 | `POST` | `/api/v1/operations/dispatch/:id/confirm` | Admin/Owner, Warehouse | Confirm truck departure; validates 100% serial scans; moves stock to In_Transit |
 | `GET` | `/api/v1/operations/dispatch/:id/challan` | Admin/Owner, Warehouse | Download Delivery Challan PDF with serialized equipment list |
@@ -348,7 +423,7 @@ When a customer calls Support reporting a breakdown (e.g., 18 months post-instal
 |---|---|---|---|
 | `GET` | `/api/v1/operations/technicians` | Admin/Owner, Warehouse, Tech | List 15 technician profiles, skills, and current job loads |
 | `GET` | `/api/v1/operations/technicians/availability` | Admin/Owner, Sales | Query technician availability for a specific date window |
-| `POST` | `/api/v1/operations/installations/schedule` | Admin/Owner | Schedule installation date and assign 2-3 technician crew with electrical lead |
+| `POST` | `/api/v1/operations/installations/schedule` | Admin/Owner | Schedule installation date and assign 2-3 technician crew with electrical lead `[NC-31]` |
 
 ### 11.7 Mobile Rooftop Installation Execution & Handover
 | Method | Endpoint | RBAC Access | Description |
@@ -357,18 +432,18 @@ When a customer calls Support reporting a breakdown (e.g., 18 months post-instal
 | `GET` | `/api/v1/operations/installations/:id` | All Authenticated | Get full installation work order, BOM checklist, and progress state |
 | `POST` | `/api/v1/operations/installations/:id/start` | Technician, Admin/Owner | Record job start timestamp after on-site system size confirmation |
 | `POST` | `/api/v1/operations/installations/:id/checkpoint` | Technician, Admin/Owner | Check off physical installation milestone (Mounting, Panels, Wiring, etc.) |
-| `POST` | `/api/v1/operations/installations/:id/testing` | Technician, Admin/Owner | Record electrical and generation safety test readings (Earthing $\le 5\Omega$) |
-| `POST` | `/api/v1/operations/installations/:id/photos` | Technician, Admin/Owner | Upload mandatory 4-angle proof photos via Cloudinary |
+| `POST` | `/api/v1/operations/installations/:id/testing` | Technician, Admin/Owner | Record electrical and generation safety test readings (Earthing $\le 5\Omega$ `[NC-29]`) |
+| `POST` | `/api/v1/operations/installations/:id/photos` | Technician, Admin/Owner | Upload mandatory 4-angle proof photos via Cloudinary `[NC-30]` |
 | `POST` | `/api/v1/operations/installations/:id/sign-handover` | Technician, Admin/Owner | Customer on-screen signature; generates Handover Certificate; completes job |
 | `POST` | `/api/v1/operations/installations/:id/rework` | Technician, Admin/Owner | Log failed test rework causes and punch-list items |
 | `GET` | `/api/v1/operations/installations/:id/handover-certificate` | All Staff, Customer | Download signed Handover and Commissioning Certificate PDF |
 
-### 11.8 Serialized Warranty Registry
+### 11.8 Serialized Warranties Registry
 | Method | Endpoint | RBAC Access | Description |
 |---|---|---|---|
-| `POST` | `/api/v1/operations/warranty/activate-project-serials`| Admin/Owner, System | Trigger automated warranty activation for all installed project serials |
-| `GET` | `/api/v1/operations/warranty/records` | All Staff Roles | List warranty records with filter by customer, project, or status |
-| `GET` | `/api/v1/operations/warranty/:serialNumber` | All Staff Roles | Query warranty status and remaining coverage for a serial number |
+| `POST` | `/api/v1/operations/warranties/activate-project-serials`| Admin/Owner, System | Trigger automated warranty activation for all installed project serials |
+| `GET` | `/api/v1/operations/warranties` | All Staff Roles | List warranty records with filter by customer, project, or status |
+| `GET` | `/api/v1/operations/warranties/:serialNumber` | All Staff Roles | Standard unified warranty lookup for Member 4 Support tickets |
 
 ---
 
@@ -455,20 +530,6 @@ All responses strictly follow Member 1's standardized envelope:
   "testingNotes": "Clear sunshine, stable grid synchronization within 45 seconds"
 }
 ```
-**Validation Failure Response (Earthing Resistance $> 5.0\ \Omega$):**
-```json
-{
-  "success": false,
-  "error": {
-    "code": "SAFETY_TEST_FAILED",
-    "message": "Earthing resistance of 8.2 Ohms exceeds the maximum safety threshold of 5.0 Ohms. Job marked for rework.",
-    "details": {
-      "earthingResistanceOhms": 8.2,
-      "maxPermittedOhms": 5.0
-    }
-  }
-}
-```
 
 ### 12.5 Customer Handover Sign-Off Payload
 - **`POST /api/v1/operations/installations/:id/sign-handover`**
@@ -493,13 +554,13 @@ erDiagram
     product_categories ||--o{ products : contains
     products ||--o{ inventory_items : tracked_in
     products ||--o{ inventory_ledger : recorded_in
-    products ||--o{ serial_registry : serialized_as
+    products ||--o{ serial_items : serialized_as
     
     stock_receipts ||--o{ stock_receipt_items : contains
     stock_receipt_items ||--|| products : references
     
     dispatch_orders ||--o{ dispatch_items : contains
-    dispatch_items }o--|| serial_registry : assigns
+    dispatch_items }o--|| serial_items : assigns
     
     technicians ||--o{ technician_assignments : assigned_to
     installation_jobs ||--o{ technician_assignments : staffed_by
@@ -508,12 +569,12 @@ erDiagram
     installation_jobs ||--o{ installation_photos : documented_by
     installation_jobs ||--|| installation_handover : completed_by
     
-    serial_registry ||--o{ warranty_records : covered_by
+    serial_items ||--o{ warranty_records : covered_by
 ```
 
 ### 13.2 Schema Table Definitions (Summary of `102_operations.sql`)
 
-#### 1. `product_categories` & `products`
+#### 1. `product_categories` & `products` (All 7 Standard Categories)
 ```sql
 CREATE TABLE IF NOT EXISTS product_categories (
     id VARCHAR(50) PRIMARY KEY,
@@ -521,6 +582,17 @@ CREATE TABLE IF NOT EXISTS product_categories (
     description TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Seed exactly 7 standard product categories
+INSERT INTO product_categories (id, name, description) VALUES
+    ('PANEL', 'Solar Panels', 'Monocrystalline and polycrystalline solar photovoltaic modules'),
+    ('INVERTER', 'Inverters', 'Grid-tied, off-grid and hybrid string inverters'),
+    ('BATTERY', 'Solar Batteries', 'Deep-cycle lithium and tubular solar battery storage units'),
+    ('CHARGE_CONTROLLER', 'Charge Controllers', 'MPPT solar charge controllers'),
+    ('STRUCTURE', 'Mounting Structures', 'Rooftop mounting stands, aluminium rails, fasteners'),
+    ('ELECTRICAL', 'Electrical Hardware', 'DC/AC distribution boxes, solar DC cables, MCBs, SPDs'),
+    ('EARTHING', 'Earthing & Protection', 'Chemical earthing electrodes, lightning arrestors, earthing compound')
+ON CONFLICT (id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS products (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -577,9 +649,9 @@ CREATE INDEX idx_ledger_product ON inventory_ledger(product_id);
 CREATE INDEX idx_ledger_created ON inventory_ledger(created_at);
 ```
 
-#### 3. `serial_registry` & `serial_audit_history`
+#### 3. `serial_items` & `serial_item_audit` (Agreed Naming with Member 4)
 ```sql
-CREATE TABLE IF NOT EXISTS serial_registry (
+CREATE TABLE IF NOT EXISTS serial_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     serial_number VARCHAR(100) NOT NULL UNIQUE,
     product_id UUID NOT NULL REFERENCES products(id),
@@ -594,13 +666,17 @@ CREATE TABLE IF NOT EXISTS serial_registry (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_serial_number ON serial_registry(serial_number);
-CREATE INDEX idx_serial_status ON serial_registry(status);
-CREATE INDEX idx_serial_project ON serial_registry(project_id);
+CREATE INDEX idx_serial_items_number ON serial_items(serial_number);
+CREATE INDEX idx_serial_items_status ON serial_items(status);
+CREATE INDEX idx_serial_items_project ON serial_items(project_id);
 
-CREATE TABLE IF NOT EXISTS serial_audit_history (
+-- Backwards-compatibility view
+CREATE OR REPLACE VIEW serial_registry AS 
+SELECT * FROM serial_items;
+
+CREATE TABLE IF NOT EXISTS serial_item_audit (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    serial_id UUID NOT NULL REFERENCES serial_registry(id) ON DELETE CASCADE,
+    serial_item_id UUID NOT NULL REFERENCES serial_items(id) ON DELETE CASCADE,
     old_status VARCHAR(50),
     new_status VARCHAR(50) NOT NULL,
     project_id UUID,
@@ -679,23 +755,25 @@ CREATE TABLE IF NOT EXISTS installation_handover (
 );
 ```
 
-#### 5. `warranty_records`
+#### 5. `warranty_records` (Agreed Schema Matching Member 4's Adapter)
 ```sql
 CREATE TABLE IF NOT EXISTS warranty_records (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    serial_id UUID NOT NULL REFERENCES serial_registry(id),
+    warranty_code VARCHAR(50) UNIQUE NOT NULL,
+    serial_item_id UUID NOT NULL REFERENCES serial_items(id),
     project_id UUID NOT NULL,
     customer_id UUID NOT NULL,
     product_id UUID NOT NULL REFERENCES products(id),
     duration_months INTEGER NOT NULL,
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
-    status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'EXPIRED', 'VOIDED', 'CLAIMED')),
-    warranty_type VARCHAR(50) NOT NULL DEFAULT 'MANUFACTURER' CHECK (warranty_type IN ('MANUFACTURER', 'INSTALLER')),
+    status VARCHAR(50) NOT NULL DEFAULT 'Active' CHECK (status IN ('Active', 'Expired', 'Void', 'Claimed')),
+    party VARCHAR(50) NOT NULL DEFAULT 'Manufacturer' CHECK (party IN ('Manufacturer', 'Installer')),
+    scope VARCHAR(100) NOT NULL DEFAULT 'Full Replacement',
     terms_summary TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_warranty_serial ON warranty_records(serial_id);
+CREATE INDEX idx_warranty_serial_item ON warranty_records(serial_item_id);
 CREATE INDEX idx_warranty_customer ON warranty_records(customer_id);
 CREATE INDEX idx_warranty_end_date ON warranty_records(end_date);
 ```
@@ -729,11 +807,11 @@ In strict conformance with Member 1's `sanitizeFinancialResponse` middleware:
 
 ---
 
-## 15. Cross-Module Integration Dependencies
+## 15. Exact Cross-Module Integration Dependencies
 
 ```mermaid
 flowchart TD
-    M2[Member 2: Sales & CRM] -->|1. Customer Accepts Quote| M3[Member 3: Operations & Fulfilment]
+    M2[Member 2: Sales & CRM] -->|1. Accepted Quote, Project & BOM| M3[Member 3: Operations & Fulfilment]
     M4[Member 4: Finance & Support] -->|2. Advance Payment Verified| M3
     M1[Member 1: Foundation] -->|3. Cloudinary Upload Signatures| M3
     M3 -->|4. BOM Stock Reserved / Shortage Flag| M2
@@ -743,15 +821,36 @@ flowchart TD
 ```
 
 ### 15.1 Inbound Dependencies from Member 2 (Sales & Customer)
-- **`orders` table:** Operations requires confirmed order record with `payment_status` and `customer_id`.
-- **`projects` table:** Operations links reservations, dispatch notes, installation jobs, and serials to `projects.id`.
-- **`project_bom_items` / `quotation_items`:** The authoritative source of parts to reserve and scan at dispatch.
+- **`orders` table:** Operations requires confirmed order record with `payment_status` (`ADVANCE_PAID` or `FULLY_PAID`) and `customer_id`.
+- **`projects` table:** Operations links reservations, dispatch notes, installation jobs, and serial items to `projects.id`.
+- **`project_bom_items` / `quotation_items`:** The authoritative source of parts to reserve and scan at dispatch (fields: `id`, `project_id`, `product_id`, `quantity`, `is_serialized`, `unit_cost`).
+- **Site Survey Measurements:** Informs cable run lengths and roof mounting bracket requirements.
 
 ### 15.2 Inbound Dependencies from Member 4 (Finance & Support)
-- **Advance Payment Verification:** Dispatch initialization checks `orders.payment_status IN ('ADVANCE_PAID', 'FULLY_PAID')` originating from Razorpay HMAC verification.
+- **Advance Payment Verification Gate:** Dispatch initialization checks `orders.payment_status IN ('ADVANCE_PAID', 'FULLY_PAID')` originating from Razorpay HMAC verification.
 
 ### 15.3 Outbound Deliverables to Member 4 (Finance, Support & Analytics)
-- **Support Ticket Warranty Checks:** Support agents invoke `GET /api/v1/operations/warranty/:serialNumber` to determine ₹0 vs paid repair billing.
+- **Direct Database Interface (Agreed Query):** Member 4's `server/src/modules/support-finance/warranty.adapter.js` directly queries:
+  ```sql
+  SELECT 
+    w.id AS warranty_id,
+    w.warranty_code,
+    w.duration_months,
+    w.start_date,
+    w.end_date,
+    w.status AS warranty_status,
+    w.party,
+    w.scope,
+    s.serial_number,
+    p.name AS product_name
+  FROM warranty_records w
+  JOIN serial_items s ON w.serial_item_id = s.id
+  JOIN products p ON s.product_id = p.id
+  WHERE LOWER(s.serial_number) = LOWER($1)
+  LIMIT 1;
+  ```
+- **REST Warranty Endpoint:** Operations provides `GET /api/v1/operations/warranties/:serialNumber` for Member 4 frontend and service consumers.
+- **Service Ticket Foreign Keys:** Member 4's `support_cases` and `service_tickets` reference `serial_item_id REFERENCES serial_items(id)`.
 - **Project Profitability Cost Figures:** Executive analytics queries `inventory_ledger` for actual hardware acquisition costs and `installation_jobs` for technician hours.
 
 ### 15.4 Integration with Member 1 (Platform Foundation)
@@ -769,15 +868,18 @@ In strict compliance with architectural guidelines, unspecified decisions are ex
 
 | ID | Topic | Spec Section | Architectural Contract Decision / [DEMO] Default |
 |---|---|---|---|
-| **[NC-01]** | Advance Payment Dispatch Threshold | §7.3, §17 | Minimum advance payment of **25%** required to schedule dispatch; Admin can grant manual exception override. |
-| **[NC-02]** | Warranty Start Event | §7.5 | Defaults to **Customer Handover Date** (when power generation is confirmed and signature is captured). |
-| **[NC-03]** | Default Warranty Durations | §7.5 | **Solar Panels:** 20 Years (240 Mos); **Inverter:** 2 Years (24 Mos); **Battery:** 2 Years (24 Mos). Configurable per product. |
-| **[NC-04]** | Manufacturer vs Installer Warranty | §7.5, §7.6 | Both modeled in `warranty_records` (`warranty_type = 'MANUFACTURER' \| 'INSTALLER'`). Installer covers 1-year workmanship. |
-| **[NC-07]** | Technician Payroll Basis | §7.7 | Tracked via logged job duration hours $\times$ technician hourly rate. |
-| **[NC-12]** | Technician Assignment Approval | §9 | Assignments performed by Operations Lead / Admin; does not require multi-step approval. |
-| **[NC-17]** | Solar Panel Serialization | §7.3 | Inverters and Batteries mandatory serialized. Panels serialized in demo seed data; bulk tracked if serial unavailable. |
-| **[NC-20]** | Replacement Unit Warranty Term | §7.5 | Warranty replacement unit **inherits remaining term** of the original unit rather than restarting. |
-| **[NC-23]** | Inventory Write-Off Threshold | §7.3 | Adjustments over ₹2,000 or write-offs require Admin approval; reservations have no auto-expiry. |
+| **`[NC-01]`** | Advance Payment Dispatch Threshold | §7.3, §17 | Spec says: *"A customer usually pays an advance, or the full amount, before work starts."* Threshold is configurable via `system_settings.advance_dispatch_threshold_pct` (demo default: `[DEMO: 25%]`); Admin override available. |
+| **`[NC-02]`** | Warranty Start Event | §7.5 | Spec says: *"The moment a delivery is done, the warranty clock should start by itself."* Configurable via `system_settings.warranty_start_event` (`DELIVERY` vs `HANDOVER`, demo default: `[DEMO: HANDOVER]`). |
+| **`[NC-03]`** | Product Warranty Terms | §7.5 | Spec says: *"for example 2 years for an inverter or battery, and 20 years for solar panels."* Durations are examples in spec; configurable per product (demo defaults: `[DEMO: Panels 240m, Inverter 24m, Battery 24m]`). |
+| **`[NC-04]`** | Manufacturer vs Installer Warranty | §7.5, §7.6 | Both modeled in `warranty_records` (`party = 'Manufacturer' \| 'Installer'`). Workmanship duration is configurable (demo default: `[DEMO: 12m workmanship]`). |
+| **`[NC-07]`** | Technician Payroll Basis | §7.7 | Tracked as hours worked $\times$ hourly rate, configurable per technician in `technicians.daily_rate`. Statutory filings are out-of-scope. |
+| **`[NC-12]`** | Technician Assignment Approval | §9 | Configurable whether Admin approval is required for every technician assignment (setting `require_admin_approval_for_assignment`, demo default: `[DEMO: false]`). |
+| **`[NC-17]`** | Solar Panel Serialization | §7.3 | Inverters, batteries, and charge controllers mandatory serialized. Panels serialization is configurable per product (demo default: `[DEMO: Panels serialized in seed]`). |
+| **`[NC-20]`** | Replacement Unit Warranty Term | §7.5 | Configurable whether replacement unit inherits remaining term or restarts coverage via `system_settings.replacement_warranty_rule` (demo default: `[DEMO: INHERIT]`). |
+| **`[NC-23]`** | Inventory Write-Off Threshold | §7.3 | Discrepancies $> ₹2,000$ or write-offs require Admin approval; reservations have no auto-expiry (demo default: `[DEMO: ₹2,000 threshold]`). |
+| **`[NC-29]`** | Electrical & Safety Test Thresholds | §7.4 | Spec mandates: *"test that power is being generated"* and *"finishes the earthing"*. Specific limits (Earthing $\le 5.0\ \Omega$, Grid voltage 210-250V AC, Generation $> 0\text{ kW}$) are configurable engineering limits (demo default: `[DEMO: Earthing <= 5.0 Ohms]`). |
+| **`[NC-30]`** | Mandatory Installation Photo Count | §7.4 | Spec mandates: *"upload photos of the finished roof"*. Minimum photo count and categories (4 angles) are configurable (demo default: `[DEMO: 4 mandatory angles]`). |
+| **`[NC-31]`** | Crew Size & Skill Composition | §7.4 | Rooftop crew size (2-3 technicians) and requirement of 1 `ELECTRICAL_LEAD` are configurable operational rules (demo default: `[DEMO: 2-3 technicians with 1 electrical lead]`). |
 
 ---
 
@@ -788,16 +890,18 @@ In strict compliance with architectural guidelines, unspecified decisions are ex
 | 1 kW to 5 kW On-Grid & Off-Grid BOM Tracking | §2, §7.3 | Master Catalog & BOM reservation with capacity validation | **COMPLIANT** |
 | Double-entry stock ledger | §7.3 | Immutable `inventory_ledger` with 8 transaction types | **COMPLIANT** |
 | Stock reservation does not reduce on-hand | §7.3 | $Q_{available} = Q_{on\_hand} - Q_{reserved}$; on-hand reduced only at dispatch | **COMPLIANT** |
-| Advance payment prerequisite for dispatch | §7.3, §17 | Dispatch creation checks `payment_status == 'ADVANCE_PAID'` | **COMPLIANT** |
+| Advance payment prerequisite for dispatch | §7.3, §17 | Dispatch creation checks `payment_status == 'ADVANCE_PAID'` (`[NC-01]`) | **COMPLIANT** |
 | Mandatory barcode/QR serial scanning | §3, §7.3 | Dispatch confirmation blocked until 100% serialized items scanned | **COMPLIANT** |
-| Global serial number uniqueness | §7.3 | Database unique constraint on `serial_registry.serial_number` | **COMPLIANT** |
+| Global serial number uniqueness | §7.3 | Database unique constraint on `serial_items.serial_number` | **COMPLIANT** |
 | 360-degree serial traceability | §3, §7.3 | `GET /api/v1/operations/serials/:serialNumber/trace` (< 2s response) | **COMPLIANT** |
 | 15-Technician roster & crew scheduling | §2, §7.4 | Roster management with certified `ELECTRICAL_LEAD` requirement | **COMPLIANT** |
 | Mobile installation execution & time tracking | §3, §7.4 | Responsive mobile job card with start/complete timestamps | **COMPLIANT** |
-| Power generation & earthing safety testing | §3, §7.4 | Threshold gates: Earthing $\le 5\Omega$, Active generation $> 0$ kW | **COMPLIANT** |
+| Power generation & earthing safety testing | §3, §7.4 | Threshold gates: Earthing $\le 5\Omega$, Active generation $> 0$ kW (`[NC-29]`) | **COMPLIANT** |
 | Failed tests trigger rework | §7.4 | Handover locked; job marked `REWORK_REQUIRED` | **COMPLIANT** |
-| Mandatory 4-angle photo uploads | §7.4 | Cloudinary upload of 4 required perspectives unlocks handover | **COMPLIANT** |
+| Mandatory photo uploads | §7.4 | Cloudinary upload of finished roof photos unlocks handover (`[NC-30]`) | **COMPLIANT** |
 | Customer on-screen digital signature | §3, §7.4 | Touch canvas signature stored with timestamp & IP/GPS | **COMPLIANT** |
-| Automated warranty clock activation | §3, §7.5 | Handover triggers 20yr panel and 2yr inverter/battery activation | **COMPLIANT** |
-| 18-month breakdown warranty claim contract | §3, §7.6 | Support endpoint returns `UNDER_WARRANTY` $\to$ ₹0 customer billing | **COMPLIANT** |
+| Automated warranty clock activation | §3, §7.5 | Handover triggers panel and inverter/battery activation (`[NC-02]`, `[NC-03]`) | **COMPLIANT** |
+| Standardized Warranty Endpoint | §7.6 | `GET /api/v1/operations/warranties/:serialNumber` matching Member 4 adapter | **COMPLIANT** |
+| Unified Database Naming | §7.5, §15 | `serial_items` and `warranty_records` matching Member 4 queries | **COMPLIANT** |
+| 7 Standard Product Categories | §2, §15 | 7 categories agreed between catalog and database | **COMPLIANT** |
 | Strict file & module ownership | Master | Only `docs/contracts/operations.md` modified in Phase 0 | **COMPLIANT** |
