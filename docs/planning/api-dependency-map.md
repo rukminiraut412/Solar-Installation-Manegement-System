@@ -1,299 +1,630 @@
-# Solar Installation Management System
-## API Dependency Map & Endpoint Route Inventory
-
-**Document Version:** 1.0  
-**Status:** Approved Architectural Baseline  
-**Authority:** `SOLAR_MANAGEMENT_SYSTEM.md` (§16 API Outline, §10 Workflow, §17 Razorpay)  
-**Base Path:** `/api/v1`  
-**Communication Protocol:** REST over HTTPS, JSON envelope
+# API DEPENDENCY MAP & CONTRACT SPECIFICATION
+**Project:** Solar Installation Management System (SunPower Solutions)  
+**Architecture:** Modular Monolith RESTful API (Express + PostgreSQL)  
+**Standard Envelope:** JSON `{ success: boolean, data?: any, error?: { code: string, message: string, details?: any } }`  
+**Document Version:** 1.0.0  
 
 ---
 
-## 1. End-to-End API Sequence Architecture
+## 1. Global API Standards & Conventions
 
-The complete business lifecycle progresses through structured API invocation stages. Each stage depends upon the successful completion and verification of prior API calls.
+### 1.1 HTTP Status Codes
+- `200 OK`: Request succeeded; returns data payload.
+- `201 Created`: Resource successfully created (includes `Location` header or resource ID).
+- `400 Bad Request`: Zod validation failure or malformed payload.
+- `401 Unauthorized`: Missing, expired, or invalid JWT Bearer token.
+- `403 Forbidden`: Authenticated user lacks required RBAC role or business state gate prevents action.
+- `404 Not Found`: Targeted resource does not exist.
+- `409 Conflict`: Unique constraint violation, duplicate serial scan, or double-booking.
+- `422 Unprocessable Entity`: Business domain logic failure (e.g. failed safety thresholds).
+- `429 Too Many Requests`: Rate limiter exceeded.
+- `500 Internal Server Error`: Unhandled server exception (stack trace stripped in production).
 
-```mermaid
-sequenceDiagram
-  autonumber
-  actor Customer
-  actor Sales
-  actor Admin
-  actor Warehouse
-  actor Technician
-  actor Support
-  participant API as Express API (/api/v1)
-  participant DB as PostgreSQL
-  participant RZP as Razorpay Test
-  
-  %% 1. Enquiry & Survey
-  Customer->>API: POST /public/enquiries
-  Sales->>API: POST /surveys (schedule)
-  Technician->>API: PATCH /surveys/:id (record findings)
-  Technician->>API: POST /surveys/:id/submit
-  Admin->>API: POST /surveys/:id/approve
-  
-  %% 2. Quotation & Order
-  Sales->>API: POST /quotations (requires approved survey)
-  Sales->>API: POST /quotations/:id/issue
-  Customer->>API: POST /quotations/:id/accept
-  Note over API,DB: Atomic Transaction: Creates Order, Project & BOM Snapshot
-  
-  %% 3. Payment
-  Customer->>API: POST /orders/:id/payment-requests (Idempotency-Key)
-  API->>RZP: Create Order (test mode)
-  Customer->>RZP: Pay via Checkout modal
-  Customer->>API: POST /payment-requests/:id/verify (HMAC check)
-  RZP->>API: POST /webhooks/razorpay (Raw body HMAC check)
-  Note over API,DB: Atomic applyVerifiedPayment(): Confirms Order & Unlocks Allocation
-  
-  %% 4. Fulfillment
-  Warehouse->>API: POST /projects/:id/allocate (reserves stock)
-  Warehouse->>API: POST /dispatches
-  Warehouse->>API: POST /dispatches/:id/scan (scan serials with row lock)
-  Warehouse->>API: POST /dispatches/:id/confirm (links serials to project)
-  Warehouse->>API: POST /dispatches/:id/deliver (triggers warranty activation)
-  
-  %% 5. Installation
-  Admin->>API: POST /jobs (installation)
-  Admin->>API: POST /jobs/:id/assign (conflict checked)
-  Technician->>API: POST /jobs/:id/start & /time-entries
-  Technician->>API: PUT /jobs/:id/tests & POST /jobs/:id/signature
-  Technician->>API: POST /jobs/:id/complete (validates checklist)
-  
-  %% 6. Service & Closure
-  Customer->>API: POST /cases (safety screen + AI triage)
-  Support->>API: POST /warranties/eligibility (backend check)
-  Support->>API: POST /service-tickets (charges gated by warranty)
-  Admin->>API: POST /cases/:id/admin-decision & /assign
-  Technician->>API: POST /cases/:id/technician-complete
-  Customer->>API: POST /cases/:id/customer-confirmation (confirm fixed)
-  Support->>API: POST /cases/:id/close (closure checks verified)
-```
+### 1.2 Common Request Headers
+- `Authorization`: `Bearer <jwt_access_token>` (Mandatory for authenticated routes).
+- `Content-Type`: `application/json` (or `multipart/form-data` for direct media streams).
+- `Idempotency-Key`: UUID v4 for financial and stock mutating endpoints.
 
 ---
 
-## 2. Master Endpoint Inventory by Ownership Domain
+## 2. API Endpoints by Feature Module
 
-### Group 1: Platform Foundation (Member 1)
+### MODULE 1: PLATFORM FOUNDATION, AUTH & SECURITY (MEMBER 1)
 
-| HTTP Method & Route | Owning Member | Required Permission | Prerequisite Routes | Consumed / Emitted Entities | Idempotency & Concurrency | Notes & Error Codes |
-|---|---|---|---|---|---|---|
-| `POST /auth/login` | Member 1 | Public | None | In: email, password<br>Out: JWT, User, Permissions | Rate-limited per IP | Generic 401 on bad credentials; 429 on lockout. |
-| `POST /auth/refresh` | Member 1 | Public (Cookie) | `POST /auth/login` | In: refresh cookie<br>Out: new access token | Rotating token | Revokes refresh family on reuse. |
-| `POST /auth/logout` | Member 1 | Authenticated | `POST /auth/login` | Out: revoked tokens | Idempotent | Clears httpOnly cookies. |
-| `POST /auth/forgot-password` | Member 1 | Public | None | In: email | Rate-limited | Generic 202 Accepted. |
-| `POST /auth/reset-password` | Member 1 | Public | `POST /auth/forgot-password` | In: token, new password | Token consumption | Invalidates existing sessions. |
-| `GET /me` | Member 1 | Authenticated | `POST /auth/login` | Out: User profile, active permissions | Read-only | Returns dynamic permission array. |
-| `GET /users` | Member 1 | `users.read` | None | Out: User list, roles | Read-only | Paginated. |
-| `POST /users` | Member 1 | `users.create` | None | In: email, role_id, full_name | Unique email check | Audited with Admin ID. |
-| `PATCH /users/:id` | Member 1 | `users.update` | `GET /users` | In: role_id, status | Optimistic lock (`version`) | Cannot demote last active Admin. |
-| `GET /settings/:group` | Member 1 | `settings.read` | None | Out: System settings JSON | Read-only | In-memory cached. |
-| `PATCH /settings/:group` | Member 1 | `settings.update` | `GET /settings/:group` | In: settings payload | Versioned update | Audited with old/new values diff. |
-| `POST /files/sign-upload` | Member 1 | `files.create` | None | In: purpose, mime, size | Signed Cloudinary params | Enforces MIME allowlist & max bytes. |
-| `POST /files/confirm` | Member 1 | `files.create` | `POST /files/sign-upload` | In: provider_public_id, bytes | Database record in `files` | Binds file to owner entity. |
-| `GET /notifications` | Member 1 | Authenticated | None | Out: User in-app notifications | Read-only | Filter by read status. |
-| `PATCH /notifications/:id/read` | Member 1 | Authenticated | `GET /notifications` | In: read boolean | Idempotent | Updates `read_at`. |
-| `GET /admin/notification-outbox`| Member 1 | `audit.read` | None | Out: Simulated notification log | Read-only | Shows simulated messages for demo. |
-| `GET /audit-logs` | Member 1 | `audit.read` | None | Out: Append-only audit entries | Read-only | Filter by entity, actor, date range. |
+#### 1. POST /api/auth/login
+- **Owner:** Member 1
+- **Auth & RBAC:** Public (Unauthenticated)
+- **Calling Frontend:** `LoginPage.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "email": "director@sunpower.com",
+    "password": "SecurePassword123!"
+  }
+  ```
+- **Response 200 OK:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "accessToken": "eyJhbGciOiJIUzI1Ni...",
+      "user": {
+        "id": "usr_981a2b",
+        "name": "SunPower Director",
+        "email": "director@sunpower.com",
+        "roles": ["Director"]
+      }
+    }
+  }
+  ```
+  *(Refresh token set as HTTP-only secure cookie `refreshToken`)*
+- **Error Codes:** 400 (Bad email/pass format), 401 (Invalid credentials), 429 (Rate limit).
+- **Downstream Dependencies:** `users`, `refresh_tokens`, `audit_logs`.
 
----
+#### 2. POST /api/auth/refresh
+- **Owner:** Member 1
+- **Auth & RBAC:** Cookie-based (`refreshToken`)
+- **Calling Frontend:** Axios Interceptor (`client.js`)
+- **Request:** Cookie payload with rotation token.
+- **Response 200 OK:**
+  ```json
+  {
+    "success": true,
+    "data": { "accessToken": "eyJhbGciOiJIUzI1Ni..." }
+  }
+  ```
+- **Error Codes:** 401 (Expired/invalid token), 403 (Token reuse detected; family revoked).
+- **Downstream Dependencies:** `refresh_tokens`, `audit_logs`.
 
-### Group 2: Customer and Sales (Member 2)
+#### 3. GET /api/audit-logs
+- **Owner:** Member 1
+- **Auth & RBAC:** Authenticated; Role: `Director`
+- **Calling Frontend:** `AuditLogView.jsx`
+- **Query Params:** `?page=1&limit=50&actorId=...&entity=...&from=...&to=...`
+- **Response 200 OK:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "logs": [
+        {
+          "id": "aud_01",
+          "actorId": "usr_981a2b",
+          "actorName": "SunPower Director",
+          "action": "SURVEY_APPROVED",
+          "entityName": "site_surveys",
+          "entityId": "srv_334",
+          "oldState": { "status": "SUBMITTED" },
+          "newState": { "status": "APPROVED" },
+          "createdAt": "2026-10-31T12:00:00Z"
+        }
+      ],
+      "pagination": { "total": 1420, "page": 1, "totalPages": 29 }
+    }
+  }
+  ```
+- **Downstream Dependencies:** `audit_logs` (read-only query).
 
-| HTTP Method & Route | Owning Member | Required Permission | Prerequisite Routes | Consumed / Emitted Entities | Idempotency & Concurrency | Notes & Error Codes |
-|---|---|---|---|---|---|---|
-| `POST /public/enquiries` | Member 2 | Public | None | In: lead details<br>Out: `ENQ-` code, `CUS-` code | IP Rate-limited | 400 Validation Error; duplicates flagged internally. |
-| `GET /customers` | Member 2 | `customer.read` | None | Out: Customer directory | Read-only | Trigram search on name/phone. |
-| `POST /customers` | Member 2 | `customer.create` | None | In: profile details | Phone deduplication | 409 `DUPLICATE_CANDIDATE` if phone matches. |
-| `GET /customers/:id` | Member 2 | `customer.read` | `GET /customers` | Out: Customer 360 profile | Read-only | Role-based phone/email masking. |
-| `PATCH /customers/:id` | Member 2 | `customer.update` | `GET /customers/:id` | In: profile updates | Optimistic lock (`version`) | 409 on version conflict. |
-| `GET /customers/:id/timeline` | Member 2 | `customer.read` | `GET /customers/:id` | Out: Aggregated timeline events | Read-only | Filtered by caller role. |
-| `POST /customers/:id/merge` | Member 2 | `customer.merge` | `GET /customers/:id` | In: target_id, reason | Atomic transaction | Soft merge; re-points all foreign keys. |
-| `GET /enquiries` | Member 2 | `enquiry.read` | None | Out: Enquiry pipeline list | Read-only | Filter by status, channel, assignee. |
-| `POST /enquiries` | Member 2 | `enquiry.create` | None | In: lead details, channel | Generates `ENQ-` code | Validates phone required for staff lead. |
-| `GET /enquiries/:id` | Member 2 | `enquiry.read` | `GET /enquiries` | Out: Enquiry record & linked docs | Read-only | Displays repeat enquiry banner. |
-| `PATCH /enquiries/:id` | Member 2 | `enquiry.update` | `GET /enquiries/:id` | In: requirements updates | Optimistic lock (`version`) | Updates capacity, notes. |
-| `POST /enquiries/:id/status` | Member 2 | `enquiry.update` | `GET /enquiries/:id` | In: status, reason | Valid transitions only | 422 `REASON_REQUIRED` for Lost/Hold. |
-| `POST /surveys` | Member 2 | `survey.schedule` | Customer Address Exists | In: enquiry_id, assignee, time | Conflict check query | 409 Conflict if surveyor booked/leave. |
-| `GET /surveys` | Member 2 | `survey.read` | None | Out: Survey calendar / list | Read-only | Filter by status, assignee, date. |
-| `GET /surveys/:id` | Member 2 | `survey.read` | `GET /surveys` | Out: Survey findings & photos | Read-only | Displays revision number. |
-| `PATCH /surveys/:id` | Member 2 | `survey.update` | `POST /surveys` | In: technical findings | Draft allowed | Rejects if survey already Approved. |
-| `POST /surveys/:id/photos/sign`| Member 2 | `survey.update` | `PATCH /surveys/:id` | In: category | Signed upload params | Categories: Roof, Shade, Meter, Cable. |
-| `POST /surveys/:id/submit` | Member 2 | `survey.submit` | `PATCH /surveys/:id` | Out: status `Submitted` | Validation assertion | 422 `SURVEY_INCOMPLETE` if fields/photos missing. |
-| `POST /surveys/:id/approve` | Member 2 | `survey.approve` | `POST /surveys/:id/submit` | Out: status `Approved` | Atomic lock | Locks survey; unlocks quote creation. |
-| `POST /surveys/:id/reject` | Member 2 | `survey.approve` | `POST /surveys/:id/submit` | In: reasonCode, comment (≥10) | State change | Moves to `Rework Required`; notifies surveyor. |
-| `POST /surveys/:id/resubmit` | Member 2 | `survey.submit` | `POST /surveys/:id/reject` | Out: new revision `Submitted` | Increments `revision_no` | Preserves historical snapshots. |
-| `GET /packages` | Member 2 | `package.read` | None | Out: Solar packages (1–5 kW) | Read-only | System types: On-Grid / Off-Grid. |
-| `POST /packages` | Member 2 | `package.manage` | None | In: package definition, BOM | Unique package name | Admin only. |
-| `POST /quotations` | Member 2 | `quotation.create` | `POST /surveys/:id/approve` | In: enquiry_id, survey_id, pkg | **Survey Approval Guard** | **422 `SURVEY_NOT_APPROVED`** if survey unapproved. |
-| `GET /quotations/:id` | Member 2 | `quotation.read` | `POST /quotations` | Out: Quotation summary & lines | Read-only | Customer views own quotations. |
-| `PATCH /quotations/:id` | Member 2 | `quotation.update` | `GET /quotations/:id` | In: discount, terms | Threshold check | Admin approval if discount > threshold. |
-| `POST /quotations/:id/bom/regenerate` | Member 2 | `quotation.update` | `POST /quotations` | Out: Calculated BOM lines | Mathematical formula | ⌈(capacity * 1000) / panel_W⌉. |
-| `PATCH /quotations/:id/items/:itemId` | Member 2 | `quotation.update` | `GET /quotations/:id` | In: qty, justification reason | Mandatory reason | Records variance from template. |
-| `POST /quotations/:id/issue` | Member 2 | `quotation.issue` | Validated BOM | Out: status `Issued` | Compatibility engine | 422 if Off-Grid lacks battery, etc. |
-| `POST /quotations/:id/accept` | Member 2 | `quotation.accept` | `POST /quotations/:id/issue` | Out: `ORD-` code, `PRJ-` code | **Atomic Transaction** | Spawns Order, Project & frozen BOM snapshot. |
-| `POST /quotations/:id/decline` | Member 2 | `quotation.accept` | `POST /quotations/:id/issue` | In: decline reason | State change | Advances quote to `Declined`. |
-
----
-
-### Group 3: Operations and Fulfilment (Member 3)
-
-| HTTP Method & Route | Owning Member | Required Permission | Prerequisite Routes | Consumed / Emitted Entities | Idempotency & Concurrency | Notes & Error Codes |
-|---|---|---|---|---|---|---|
-| `GET /products` | Member 3 | `inventory.read` | None | Out: Catalog products, SKUs | Read-only | Serialized flag, reorder level. |
-| `POST /products` | Member 3 | `inventory.manage` | None | In: SKU, category, name, cost | Unique SKU | Admin only. |
-| `GET /stock` | Member 3 | `inventory.read` | None | Out: On-hand, reserved, available | Read-only | Available = on_hand - reserved. |
-| `GET /stock/movements` | Member 3 | `inventory.read` | None | Out: Transactional movement log | Read-only | Filter by product, project, date. |
-| `POST /inventory/receipts` | Member 3 | `inventory.manage` | None | In: supplier, invoice, serials | Unique serial constraint | Increments on_hand; status `IN_STOCK`. |
-| `POST /projects/:id/allocate` | Member 3 | `inventory.manage` | Order Confirmed / Exception | In: project_id | **Payment Gate Guard** | 422 `PAYMENT_GATE_NOT_MET` if unpaid. Flags Short. |
-| `POST /projects/:id/reservations/release` | Member 3 | `inventory.manage` | Allocated BOM | In: project_id, reason | Atomic release | Decrements reserved; writes movement. |
-| `POST /dispatches` | Member 3 | `dispatch.create` | Reserved BOM | In: project_id, line quantities | Qty <= reserved | 422 `INSUFFICIENT_STOCK` if unreserved. |
-| `GET /dispatches/:id` | Member 3 | `dispatch.read` | `POST /dispatches` | Out: Dispatch lines & scan status | Read-only | Displays per-line scan progress. |
-| `POST /dispatches/:id/scan` | Member 3 | `dispatch.scan` | `POST /dispatches` | In: serial_number, product_id | **Row Lock on serial** | 422 `SERIAL_ALREADY_ASSIGNED` / `SERIAL_UNKNOWN`. |
-| `DELETE /dispatches/:id/scan/:serial` | Member 3 | `dispatch.scan` | `POST /dispatches/:id/scan` | In: serial_number, reason | Release lock | Unscans serial; status returns `RESERVED`. |
-| `POST /dispatches/:id/confirm` | Member 3 | `dispatch.confirm` | Scanned Serial Counts Match | Out: status `Dispatched` | **Atomic Transaction** | 422 `SCAN_COUNT_MISMATCH`. Spawns pending warranties. |
-| `POST /dispatches/:id/deliver` | Member 3 | `dispatch.deliver` | `POST /dispatches/:id/confirm` | In: delivered_at | **Warranty Trigger** | Status `Delivered`. Activates warranties under default rule. |
-| `POST /stock-exceptions` | Member 3 | `inventory.manage` | None | In: type, serial, qty, photo | Exception record | Damage / site returns / stock adjustments. |
-| `POST /stock-exceptions/:id/approve` | Member 3 | `inventory.approve` | `POST /stock-exceptions` | In: reason | Cost entry & movement | Admin approval for inventory write-offs. |
-| `GET /serials/:serial/trace` | Member 3 | `serials.trace` | Registered Serial | Out: Complete chronological trace | Read-only | Trace: supplier → dispatch → roof → warranty. |
-| `GET /technicians` | Member 3 | `technicians.read` | None | Out: Technician directory | Read-only | Cost rate visible to Admin only. |
-| `PATCH /technicians/:id` | Member 3 | `technicians.manage` | `GET /technicians` | In: skills, areas, max jobs/day | Optimistic lock | Admin only. |
-| `POST /technicians/:id/unavailability` | Member 3 | `technicians.manage` | `GET /technicians` | In: start_at, end_at, reason | Date range validation | Blocks assignment scheduler. |
-| `GET /schedule` | Member 3 | `jobs.read` | None | Out: Master crew calendar | Read-only | Overlaps and conflicts highlighted. |
-| `POST /jobs` | Member 3 | `jobs.schedule` | Materials Dispatched | In: project_id, type | Gate check | Spawns installation job. |
-| `POST /jobs/:id/assign` | Member 3 | `jobs.assign` | `POST /jobs` | In: technician_ids, role (LEAD) | **Conflict Check** | 409 Conflict if crew member busy. Min 1 Lead. |
-| `POST /jobs/:id/reschedule` | Member 3 | `jobs.schedule` | `POST /jobs/:id/assign` | In: new_start, reason, requester| History log | Notifies assigned crew. |
-| `GET /my/jobs` | Member 3 | `jobs.execute` | None | Out: Assigned jobs only | **Row Scoped** | 403 if technician attempts unassigned job. |
-| `POST /jobs/:id/start` | Member 3 | `jobs.execute` | `GET /my/jobs` | In: actual_start_at | State change | Advances job to `In Progress`. |
-| `POST /jobs/:id/time-entries` | Member 3 | `jobs.execute` | `POST /jobs/:id/start` | In: clock_in, clock_out | Time validation | Feeds technician timesheets & labor cost. |
-| `POST /jobs/:id/photos/sign` | Member 3 | `jobs.execute` | `POST /jobs/:id/start` | In: category | Signed upload | Mandatory 7 categories. |
-| `PUT /jobs/:id/tests` | Member 3 | `jobs.execute` | `POST /jobs/:id/start` | In: test results (pass/fail, val) | Test checklist | Failed test moves job to `Rework Required`. |
-| `POST /jobs/:id/signature` | Member 3 | `jobs.execute` | Passed Tests | In: signature image, signer_name | Stored in `signatures` | Customer digital signature. |
-| `POST /jobs/:id/complete` | Member 3 | `jobs.execute` | Signature Captured | Out: status `Completed` | **Completion Guard** | 422 `COMPLETION_INCOMPLETE` if any item missing. |
-| `POST /jobs/:id/reopen` | Member 3 | `jobs.reopen` | `POST /jobs/:id/complete` | In: reason | Admin only | Reopens job for rework; audited. |
-| `GET /warranties` | Member 3 | `warranty.read` | None | Out: Warranty records | Read-only | Filter by customer, serial, status. |
-| `GET /warranties/:id` | Member 3 | `warranty.read` | `GET /warranties` | Out: Term snapshot, dates | Read-only | Shows party badge (Manufacturer/Installer). |
-| `POST /warranties/eligibility` | Member 3 | `warranty.read` | `GET /warranties` | In: serial/customer, claim_date | **Deterministic Engine** | Returns `WITHIN_PERIOD`, `EXPIRED`, `NOT_ACTIVE`, etc. |
-| `POST /warranties/:id/void` | Member 3 | `warranty.void` | `GET /warranties/:id` | In: reason (min 10 chars) | Admin only | Audited with reason. |
-| `POST /settings/warranty` | Member 3 | `settings.manage` | None | In: warranty term definitions | Future records only | Configures duration, party, start event. |
+#### 4. POST /api/media/sign-upload
+- **Owner:** Member 1
+- **Auth & RBAC:** Authenticated; Roles: All
+- **Calling Frontend:** `PhotoUploader.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "folder": "installation_proof",
+    "resourceType": "image"
+  }
+  ```
+- **Response 200 OK:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "timestamp": 1793444400,
+      "signature": "c8f2a1b9...",
+      "apiKey": "cloudinary_api_key",
+      "uploadUrl": "https://api.cloudinary.com/v1_1/sunpower/image/upload"
+    }
+  }
+  ```
+- **Downstream Dependencies:** Cloudinary SDK cryptographic signature generator.
 
 ---
 
-### Group 4: Support, Finance and AI (Member 4)
+### MODULE 2: CUSTOMER & SALES MANAGEMENT (MEMBER 2)
 
-| HTTP Method & Route | Owning Member | Required Permission | Prerequisite Routes | Consumed / Emitted Entities | Idempotency & Concurrency | Notes & Error Codes |
-|---|---|---|---|---|---|---|
-| `POST /orders/:id/payment-requests` | Member 4 | `payment.create` | Order Accepted | In: purpose; Header: Idempotency-Key | **Server-Derived Amount** | Razorpay order created; repeated key returns same request. |
-| `GET /payment-requests/:id` | Member 4 | `payment.read` | `POST /payment-requests` | Out: Payment status, order_id | Read-only | Polled by customer during checkout. |
-| `POST /payment-requests/:id/verify` | Member 4 | `payment.verify` | Checkout Callback | In: razorpay_payment_id, signature | **HMAC Verification** | Validates signature with `RAZORPAY_KEY_SECRET`. |
-| `POST /webhooks/razorpay` | Member 4 | Public (Webhook) | Razorpay Event | In: raw body buffer, signature | **Raw Body HMAC** | 400 Invalid signature; deduplicated by event ID. |
-| `POST /payment-requests/:id/reconcile` | Member 4 | `payment.reconcile` | Stuck/Mismatch Payment | In: action, reason | Admin only | Reconciles discrepancies; reversing entries only. |
-| `POST /payments/manual` | Member 4 | `payment.manual` | Order Confirmed | In: order_id, amount, proof | Admin only | Offline cash/bank entry; audited with proof file. |
-| `GET /payments` | Member 4 | `finance.read` | None | Out: Verified payment ledger | Read-only | Filters by date, purpose; shows test mode flag. |
-| `POST /invoices` | Member 4 | `finance.manage` | Order Confirmed | In: order_id | Derived from BOM | Status `Issued`. |
-| `GET /invoices` | Member 4 | `finance.read` | None | Out: Invoice list & balances | Read-only | Outstanding = total - verified payments. |
-| `POST /invoices/:id/void` | Member 4 | `finance.manage` | `POST /invoices` | In: reason | Admin only | Voids invoice; audited. |
-| `POST /expenses` | Member 4 | `finance.manage` | None | In: project_id, amount, category | Stored unapproved | Requires Admin approval to impact P/L. |
-| `POST /expenses/:id/approve` | Member 4 | `finance.approve` | `POST /expenses` | Out: status `Approved` | Admin only | Counts toward project actual costs. |
-| `POST /timesheets/:id/approve` | Member 4 | `finance.approve` | Clock-Out Captured | Out: locked hours | Admin only | Freezes labor cost hours. |
-| `GET /projects/:id/profitability` | Member 4 | `finance.read` | Dispatched / Worked Project | Out: Itemized P/L, margin % | Formula Calculation | Revenue - (Materials + Labor + Direct + Service). |
-| `GET /dashboard/:role` | Member 4 | Authenticated | None | Out: Role-tailored metrics | Server Aggregated | Includes `ReconciliationWidget` (0 discrepancy). |
-| `POST /cases` | Member 4 | Customer / Support | Installed Equipment | In: description, equipment_id | **Safety Interceptor** | **P1 Alert** if smoke/fire detected; bypasses AI. |
-| `GET /cases` | Member 4 | `cases.read` | None | Out: Support cases queue | Read-only | P1 pinned at top; SLA timer tracking. |
-| `GET /cases/:id` | Member 4 | `cases.read` | `POST /cases` | Out: Case detail & timeline | **Visibility Filter** | **Customer view excludes INTERNAL notes**. |
-| `POST /cases/:id/messages` | Member 4 | `cases.update` | `GET /cases/:id` | In: body, visibility (INTERNAL) | Real-time chat | Internal notes visible to staff only. |
-| `POST /cases/:id/triage` | Member 4 | System / Support | `POST /cases` | In: guided triage answers | Grounded guidance | Uses approved help articles for basic issues. |
-| `POST /cases/:id/classification` | Member 4 | `cases.update` | `POST /cases/:id/triage` | In: category, priority, reason | Override log | Support confirms/overrides AI classification. |
-| `POST /cases/:id/escalate-admin` | Member 4 | `cases.escalate` | `GET /cases/:id` | In: summary, proposed action | State change | Advances case to `Awaiting Admin Approval`. |
-| `POST /cases/:id/admin-decision` | Member 4 | `cases.approve` | `POST /cases/:id/escalate-admin` | In: decision (Approve/Reject), reason | Admin only | Authorizes field technician dispatch. |
-| `POST /cases/:id/assign` | Member 4 | `cases.assign` | Approved for Tech | In: technician_id, schedule | Conflict check | Status moves to `Assigned`. |
-| `POST /cases/:id/technician-complete` | Member 4 | `cases.execute` | Assigned Job | In: work notes, parts used, resolved | State change | Moves to `Awaiting Support Review`. Never closes. |
-| `POST /cases/:id/support-review` | Member 4 | `cases.review` | Work Completed | In: accept/rework, notes | State change | Requests customer confirmation. |
-| `POST /cases/:id/customer-confirmation` | Member 4 | Customer (own) | Support Reviewed | In: result (CONFIRMED/DISPUTED) | Customer Sign-Off | Confirmed -> Resolved; Disputed -> Reopened. |
-| `POST /cases/:id/close` | Member 4 | `cases.close` | Customer Confirmed | Out: status `Closed` | **Closure Guard** | 422 `CLOSURE_CHECKS_FAILED` if unconfirmed. |
-| `POST /service-tickets` | Member 4 | `tickets.create` | `POST /cases` | In: case_id, serial_id | Linked ticket | Created when service action required. |
-| `PATCH /service-tickets/:id/coverage`| Member 4 | `tickets.manage` | `POST /warranties/eligibility` | In: coverage decision, reason | Pre-Billing Gate | Sets `COVERED_WARRANTY` or `NOT_COVERED_PAID`. |
-| `POST /service-tickets/:id/charges` | Member 4 | `tickets.manage` | Decided Coverage | In: charge type, amount | **Coverage Guard** | **422 `COVERAGE_PENDING`** if coverage undecided. |
-| `POST /ai/enquiries/:id/summary` | Member 4 | `enquiry.read` | Saved Enquiry | Out: Grounded summary card | Read-only | Citations checked against context. |
-| `POST /ai/enquiries/:id/missing-info` | Member 4 | `enquiry.read` | Saved Enquiry | Out: Missing required fields list | **Deterministic Rules** | Identifies unpopulated roof area, bill, address. |
-| `POST /ai/cases/:id/summary` | Member 4 | `cases.read` | Saved Case | Out: Grounded case summary | Read-only | Summarizes history and linked warranties. |
-| `POST /ai/warranties/:id/explain` | Member 4 | `warranty.read` | Active Warranty | Out: Plain-language explanation | Output Validator | Explains remaining period alongside system result. |
-| `POST /ai/cases/:id/triage` | Member 4 | Public/Customer | Customer Issue Text | Out: Triage classification & advice | Pre-screened | Advice derived strictly from approved help articles. |
+#### 5. POST /api/sales/public/enquiries
+- **Owner:** Member 2
+- **Auth & RBAC:** Public (Rate-limited: 5 requests/15m/IP)
+- **Calling Frontend:** `PublicEnquiryForm.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "fullName": "Amit Patel",
+    "phoneNumber": "9876543210",
+    "email": "amit.patel@example.com",
+    "address": "42 Surya Nagar, Near Main Water Tank",
+    "pincode": "395007",
+    "monthlyElectricityBill": 3200,
+    "preferredSystemType": "ON_GRID",
+    "sourceChannel": "WEB_FORM"
+  }
+  ```
+- **Response 201 Created:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "enquiryId": "enq_7781",
+      "referenceNumber": "SUN-ENQ-2026-7781",
+      "status": "NEW"
+    }
+  }
+  ```
+- **Error Codes:** 400 (Invalid phone/bill), 429 (Rate limit).
+- **Downstream Dependencies:** `enquiries`, duplicate checker, background SMS acknowledgment trigger.
+
+#### 6. GET /api/sales/enquiries
+- **Owner:** Member 2
+- **Auth & RBAC:** Authenticated; Roles: `Sales`, `Director`
+- **Calling Frontend:** `EnquiryInboxPage.jsx`
+- **Query Params:** `?status=NEW&search=...&page=1&limit=25`
+- **Response 200 OK:** List of enquiries with duplicate warning flags and preliminary qualification status.
+- **Downstream Dependencies:** `enquiries`, `customers`.
+
+#### 7. POST /api/sales/enquiries/:id/merge
+- **Owner:** Member 2
+- **Auth & RBAC:** Authenticated; Roles: `Sales`, `Director`
+- **Calling Frontend:** `EnquiryInboxPage.jsx` (Merge Modal)
+- **Request Body (Zod):**
+  ```json
+  {
+    "targetCustomerId": "cust_101",
+    "resolutionNotes": "Consolidated repeat inquiry from WhatsApp and web form."
+  }
+  ```
+- **Response 200 OK:** Merged customer record with linked enquiry history.
+- **Downstream Dependencies:** `enquiries`, `customers`, `audit_logs`.
+
+#### 8. POST /api/sales/surveys/schedule
+- **Owner:** Member 2
+- **Auth & RBAC:** Authenticated; Roles: `Sales`, `Director`
+- **Calling Frontend:** `SurveyScheduleModal.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "customerId": "cust_101",
+    "technicianId": "tech_05",
+    "scheduledDate": "2026-11-03T10:00:00Z",
+    "roofAccessNotes": "Keys available with security guard. Flat RCC terrace."
+  }
+  ```
+- **Response 201 Created:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "surveyId": "srv_550",
+      "status": "SCHEDULED",
+      "assignedTechnician": "Rajesh Kumar"
+    }
+  }
+  ```
+- **Error Codes:** 400 (Customer not qualified), 409 (Technician slot conflict).
+- **Downstream Dependencies:** `site_surveys`, `technician_assignments`, `customers`, `audit_logs`.
+
+#### 9. POST /api/sales/surveys/:id/execute
+- **Owner:** Member 2
+- **Auth & RBAC:** Authenticated; Roles: `Technician`, `Director`
+- **Calling Frontend:** `SiteSurveyExecutionForm.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "roofDirectionAzimuth": 180,
+    "tiltAngleDegrees": 22.5,
+    "shadowFreeAreaSqFt": 380,
+    "cableDistanceMeters": 28,
+    "roofType": "RCC_CONCRETE",
+    "structuralIntegrity": "GOOD",
+    "notes": "South-facing clear roof; minor chimney shadow on northwest corner."
+  }
+  ```
+- **Response 200 OK:** Survey record updated with status = 'SUBMITTED'.
+- **Downstream Dependencies:** `site_surveys`, `survey_measurements`, `audit_logs`.
+
+#### 10. POST /api/sales/surveys/:id/approve (Review Gate)
+- **Owner:** Member 2
+- **Auth & RBAC:** Authenticated; Roles: `Sales`, `Director`
+- **Calling Frontend:** `SurveyApprovalPage.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "decision": "APPROVED",
+    "reviewNotes": "Structural strength adequate for 6 panels (3kW). Cable run within allowable limits."
+  }
+  ```
+- **Response 200 OK:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "surveyId": "srv_550",
+      "status": "APPROVED",
+      "approvedBy": "usr_sales_lead"
+    }
+  }
+  ```
+- **Error Codes:** 400 (Missing review notes), 422 (Survey missing required measurements/photos).
+- **Downstream Dependencies:** `site_surveys`, `survey_reviews`, `audit_logs`.
+
+#### 11. POST /api/sales/quotations/generate-bom
+- **Owner:** Member 2
+- **Auth & RBAC:** Authenticated; Roles: `Sales`, `Director`
+- **Calling Frontend:** `QuotationBuilderPage.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "surveyId": "srv_550",
+    "packageCapacityKw": 3.0,
+    "gridType": "ON_GRID"
+  }
+  ```
+- **Response 200 OK:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "packageTitle": "3 kW On-Grid Solar System",
+      "bomItems": [
+        { "sku": "PNL-MONO-540W", "name": "540W Monocrystalline Solar Panel", "quantity": 6, "unitPrice": 14000 },
+        { "sku": "INV-3.3KW-ONGRID", "name": "3.3 kW Grid-Tied Inverter", "quantity": 1, "unitPrice": 38000 },
+        { "sku": "MNT-ALU-STRUCTURE-3KW", "name": "Aluminium Mounting Structure Set", "quantity": 2, "unitPrice": 7500 },
+        { "sku": "CBL-4SQMM-DC", "name": "4 sq mm Solar DC Copper Cable", "quantity": 35, "unitPrice": 85 },
+        { "sku": "EARTH-KIT-COPPER", "name": "Safety Earthing Rod & Compound", "quantity": 2, "unitPrice": 3200 }
+      ],
+      "baseHardwareTotal": 174675,
+      "installationLabor": 18000,
+      "estimatedGst": 23121,
+      "estimatedSubsidy": 78000,
+      "netCustomerPayable": 137796
+    }
+  }
+  ```
+- **Downstream Dependencies:** `packages`, `package_components`, `products`.
+
+#### 12. POST /api/sales/quotations
+- **Owner:** Member 2
+- **Auth & RBAC:** Authenticated; Roles: `Sales`, `Director`
+- **Calling Frontend:** `QuotationBuilderPage.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "customerId": "cust_101",
+    "surveyId": "srv_550",
+    "packageCapacityKw": 3.0,
+    "gridType": "ON_GRID",
+    "bomItems": [...],
+    "hardwareTotal": 174675,
+    "laborTotal": 18000,
+    "discountAmount": 0,
+    "taxRatePercent": 12.0,
+    "taxAmount": 23121,
+    "grandTotal": 215796,
+    "estimatedSubsidy": 78000,
+    "validUntil": "2026-11-15T23:59:59Z"
+  }
+  ```
+- **Response 201 Created:** Created quotation with secure public access token and PDF download URL.
+- **Error Codes:** 403 (Survey not approved), 400 (Calculation mismatch).
+- **Downstream Dependencies:** `quotations`, `quotation_items`, `quotation_versions`, `audit_logs`.
+
+#### 13. POST /api/sales/public/quotations/:token/accept
+- **Owner:** Member 2
+- **Auth & RBAC:** Public (Cryptographic Token)
+- **Calling Frontend:** `CustomerQuoteAcceptPage.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "customerSignatoryName": "Amit Patel",
+    "acceptedTerms": true
+  }
+  ```
+- **Response 200 OK:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "quoteStatus": "ACCEPTED",
+      "orderId": "ord_9901",
+      "projectId": "prj_9901",
+      "advanceRequiredPaise": 5394900,
+      "message": "Quotation accepted. Order initialized. Proceed to advance payment."
+    }
+  }
+  ```
+- **Error Codes:** 400 (Quote expired or already accepted).
+- **Downstream Dependencies:** `quotations`, `orders`, `projects`, `stock_reservations` trigger, `audit_logs`.
 
 ---
 
-## 3. Cross-Module API Dependency Graph
+### MODULE 3: OPERATIONS, INVENTORY & FULFILMENT (MEMBER 3)
 
-The table below details which upstream API endpoint must successfully execute to produce the prerequisite entity required by a downstream API endpoint:
+#### 14. POST /api/operations/inventory/receipts (GRN)
+- **Owner:** Member 3
+- **Auth & RBAC:** Authenticated; Roles: `Warehouse`, `Director`
+- **Calling Frontend:** `StockReceiptPage.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "vendorName": "Luminous Solar Industries",
+    "vendorInvoiceNumber": "LUM-INV-2026-904",
+    "warehouseId": "wh_central",
+    "items": [
+      {
+        "productId": "prd_inv_3.3kw",
+        "quantity": 10,
+        "unitCost": 35000,
+        "serialNumbers": [
+          "INV-33-2026-00101", "INV-33-2026-00102", "INV-33-2026-00103",
+          "INV-33-2026-00104", "INV-33-2026-00105", "INV-33-2026-00106",
+          "INV-33-2026-00107", "INV-33-2026-00108", "INV-33-2026-00109", "INV-33-2026-00110"
+        ]
+      }
+    ]
+  }
+  ```
+- **Response 201 Created:** GRN reference ID, inventory balances updated, 10 unique serial numbers registered.
+- **Error Codes:** 409 (Duplicate serial number detected in database).
+- **Downstream Dependencies:** `stock_receipts`, `inventory_ledger`, `serial_registry`, `audit_logs`.
 
-```
-[POST /public/enquiries] ➔ Produces Customer & Enquiry (New)
-    │
-    ▼
-[POST /surveys] ➔ Produces Survey (Scheduled)
-    │
-    ▼
-[PATCH /surveys/:id & POST /submit] ➔ Produces Survey (Submitted)
-    │
-    ▼
-[POST /surveys/:id/approve] ➔ Produces Survey (Approved)
-    │
-    ▼
-[POST /quotations] ➔ Produces Quotation Draft (Strictly requires Approved Survey)
-    │
-    ▼
-[POST /quotations/:id/issue] ➔ Validates compatibility, Produces Quotation (Issued)
-    │
-    ▼
-[POST /quotations/:id/accept] ➔ ATOMIC: Produces Order (Created) & Project (Created)
-    │
-    ├──► [POST /orders/:id/payment-requests] ➔ Produces Razorpay Order (Created)
-    │        │
-    │        ▼
-    │    [POST /payment-requests/:id/verify] ➔ ATOMIC: Produces Payment (Verified)
-    │        │
-    │        ▼
-    │    [Order advances to Confirmed, Unlocks Allocation Gate]
-    │
-    └──► [POST /projects/:id/allocate] ➔ Reserves Stock in Warehouse
-             │
-             ▼
-         [POST /dispatches] ➔ Produces Dispatch Note (Draft)
-             │
-             ▼
-         [POST /dispatches/:id/scan] ➔ Validates & Locks Serial Numbers
-             │
-             ▼
-         [POST /dispatches/:id/confirm] ➔ Links Serials to Project, Produces Pending Warranties
-             │
-             ▼
-         [POST /dispatches/:id/deliver] ➔ Sets delivered_at, ACTIVATES WARRANTIES
-             │
-             ▼
-         [POST /jobs] ➔ Dispatches Installation Crew (Lead + Helpers)
-             │
-             ▼
-         [POST /jobs/:id/complete] ➔ Validates Tests & Signature, Produces Order (Installed)
-             │
-             ▼
-         [POST /cases] ➔ Customer Reports Issue (Deterministic Safety Interception)
-             │
-             ▼
-         [POST /warranties/eligibility] ➔ Evaluates Active Warranty Period
-             │
-             ▼
-         [PATCH /service-tickets/:id/coverage] ➔ Unlocks Pre-Billing Charges Guard
-             │
-             ▼
-         [POST /cases/:id/admin-decision & /assign] ➔ Dispatches Service Technician
-             │
-             ▼
-         [POST /cases/:id/customer-confirmation] ➔ Customer Confirms Issue Resolved
-             │
-             ▼
-         [POST /cases/:id/close] ➔ Enforces Closure Checklist, Closes Ticket & Case
-             │
-             ▼
-         [GET /projects/:id/profitability] ➔ Reconciles Revenue against Actual Costs
-```
+#### 15. POST /api/operations/projects/:id/reserve-stock
+- **Owner:** Member 3
+- **Auth & RBAC:** Authenticated; Roles: `Warehouse`, `Director`, System
+- **Calling Frontend:** Project Stock Card / Order Confirmation
+- **Request Body:** `{}` (BOM components pulled automatically from Project)
+- **Response 200 OK:** Stock reservation success or Shortage Flagged details.
+- **Error Codes:** 409 Conflict with `{ shortageItems: [...] }`.
+- **Downstream Dependencies:** `stock_reservations`, `inventory_ledger`.
+
+#### 16. POST /api/operations/dispatch/:id/verify-serial
+- **Owner:** Member 3
+- **Auth & RBAC:** Authenticated; Roles: `Warehouse`
+- **Calling Frontend:** `DispatchScannerPage.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "serialNumber": "INV-33-2026-00104",
+    "productId": "prd_inv_3.3kw"
+  }
+  ```
+- **Response 200 OK:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "serialNumber": "INV-33-2026-00104",
+      "productName": "3.3 kW Grid-Tied Inverter",
+      "status": "VERIFIED_FOR_DISPATCH",
+      "scannedItemsCount": 1,
+      "totalRequiredCount": 1
+    }
+  }
+  ```
+- **Error Codes:** 404 (Serial unknown), 400 (Wrong product model), 409 (Serial assigned elsewhere).
+- **Downstream Dependencies:** `serial_registry`, `dispatch_items`.
+
+#### 17. POST /api/operations/dispatch/:id/confirm
+- **Owner:** Member 3
+- **Auth & RBAC:** Authenticated; Roles: `Warehouse`
+- **Calling Frontend:** `DispatchScannerPage.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "vehicleNumber": "GJ-05-BX-4412",
+    "driverName": "Suresh Rathod",
+    "driverPhone": "9825098250"
+  }
+  ```
+- **Response 200 OK:** Dispatch confirmed; delivery challan generated; items marked 'IN_TRANSIT'.
+- **Error Codes:** 400 (Unscanned serial slots remain).
+- **Downstream Dependencies:** `dispatch_orders`, `inventory_ledger`, `serial_registry`, `audit_logs`.
+
+#### 18. POST /api/operations/installations/:id/testing
+- **Owner:** Member 3
+- **Auth & RBAC:** Authenticated; Roles: `Technician`
+- **Calling Frontend:** `GenerationTestingForm.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "gridVoltageVolts": 232.0,
+    "vocVolts": 245.5,
+    "activeGenerationKw": 2.85,
+    "earthingResistanceOhms": 2.4,
+    "testingInstrumentModel": "Fluke 1587 FC / Metravi Solar"
+  }
+  ```
+- **Response 200 OK:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "testStatus": "PASSED",
+      "message": "All parameters within safety thresholds. Ready for photo upload & handover."
+    }
+  }
+  ```
+- **Error Codes:** 422 (Earthing resistance > 5.0 Ohms or power = 0; status becomes 'FAILED_REWORK').
+- **Downstream Dependencies:** `installation_tests`, `installation_jobs`, `audit_logs`.
+
+#### 19. POST /api/operations/installations/:id/sign-handover
+- **Owner:** Member 3
+- **Auth & RBAC:** Authenticated; Roles: `Technician`, `Customer`
+- **Calling Frontend:** `HandoverSignatureModal.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "customerSignatoryName": "Amit Patel",
+    "relationship": "Property Owner",
+    "signatureDataUrl": "data:image/png;base64,iVBORw0KGgo...",
+    "customerConfirmationAcknowledged": true
+  }
+  ```
+- **Response 200 OK:** Job completed; certificate generated; triggers automated warranty activation.
+- **Error Codes:** 400 (Missing 4 photo angles, failed test, or blank signature).
+- **Downstream Dependencies:** `installation_handover`, `installation_jobs`, `digital_signatures`, `warranty_records` activation, `audit_logs`.
+
+---
+
+### MODULE 4: SUPPORT, FINANCE & AI CAPABILITIES (MEMBER 4)
+
+#### 20. POST /api/finance/payments/razorpay/create-order
+- **Owner:** Member 4
+- **Auth & RBAC:** Authenticated; Roles: `Customer`, `Sales`, `Finance`, `Director`
+- **Calling Frontend:** `RazorpayCheckoutModal.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "projectId": "prj_9901",
+    "milestoneType": "ADVANCE_PAYMENT",
+    "amountPaise": 5394900
+  }
+  ```
+- **Response 200 OK:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "razorpayOrderId": "order_EKf345A67Z",
+      "amount": 5394900,
+      "currency": "INR",
+      "keyId": "rzp_test_sunpower123"
+    }
+  }
+  ```
+- **Downstream Dependencies:** Razorpay Node.js SDK, `payments`, `payment_transactions`.
+
+#### 21. POST /api/finance/payments/razorpay/verify
+- **Owner:** Member 4
+- **Auth & RBAC:** Authenticated; Roles: `Customer`, `Sales`, `Finance`
+- **Calling Frontend:** `RazorpayCheckoutModal.jsx` (Client Checkout Callback)
+- **Request Body (Zod):**
+  ```json
+  {
+    "razorpayOrderId": "order_EKf345A67Z",
+    "razorpayPaymentId": "pay_EKf789B12C",
+    "razorpaySignature": "2f4e91b..."
+  }
+  ```
+- **Response 200 OK:** Cryptographically verified; Order marked 'ADVANCE_PAID'.
+- **Error Codes:** 400 (Invalid cryptographic HMAC signature).
+- **Downstream Dependencies:** Crypto module, `payments`, `orders`, `audit_logs`.
+
+#### 22. POST /api/finance/payments/razorpay/webhook
+- **Owner:** Member 4
+- **Auth & RBAC:** Public Webhook (HMAC Header `X-Razorpay-Signature`)
+- **Calling Frontend:** Razorpay Webhook Gateway
+- **Request Body:** Standard Razorpay Webhook JSON payload.
+- **Response 200 OK:** `{ "status": "OK" }` (Processed or skipped duplicate).
+- **Error Codes:** 400 (Invalid webhook secret signature).
+- **Downstream Dependencies:** `payment_webhooks` (idempotency key: `event_id`), `payments`, `customer_ledger`.
+
+#### 23. POST /api/support/tickets
+- **Owner:** Member 4
+- **Auth & RBAC:** Authenticated; Roles: `Support`, `Director`, `Customer`
+- **Calling Frontend:** `SupportHelpdeskPage.jsx`
+- **Request Body (Zod):**
+  ```json
+  {
+    "customerPhone": "9876543210",
+    "category": "INVERTER_FAULT",
+    "faultCode": "E04",
+    "description": "Inverter displays red blinking fault code E04 during rain and gives zero generation."
+  }
+  ```
+- **Response 201 Created:** Ticket created; linked to installed inverter serial `INV-33-2026-00104`; warranty status resolved.
+- **Downstream Dependencies:** `support_tickets`, `customers`, `serial_registry`, `warranty_records`.
+
+#### 24. POST /api/support/tickets/:id/verify-warranty
+- **Owner:** Member 4
+- **Auth & RBAC:** Authenticated; Roles: `Support`, `Director`
+- **Calling Frontend:** `TicketDetailPage.jsx`
+- **Request Body:** `{}`
+- **Response 200 OK:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "ticketId": "tck_1102",
+      "serialNumber": "INV-33-2026-00104",
+      "warrantyStatus": "UNDER_WARRANTY",
+      "warrantyEndDate": "2028-11-04T00:00:00Z",
+      "daysRemaining": 734,
+      "serviceBillableAmount": 0,
+      "contractTerms": "Replacement and site visit 100% covered under manufacturer warranty."
+    }
+  }
+  ```
+- **Downstream Dependencies:** `warranty_records`, `support_tickets`.
+
+#### 25. POST /api/ai/triage-ticket
+- **Owner:** Member 4
+- **Auth & RBAC:** Authenticated; Roles: `Support`, `Director`
+- **Calling Frontend:** `TicketDetailPage.jsx` (AI Copilot Panel)
+- **Request Body (Zod):**
+  ```json
+  {
+    "ticketId": "tck_1102",
+    "faultCode": "E04",
+    "equipmentModel": "Luminous 3.3 kW Grid-Tied Inverter"
+  }
+  ```
+- **Response 200 OK:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "groundedExplanation": "Fault code E04 indicates Grid Overvoltage Protection. The inverter automatically disconnected because AC grid voltage exceeded 255V.",
+      "probableCauses": ["Local transformer tap setting high", "Phase imbalance on utility line during light neighborhood load"],
+      "recommendedActions": ["Measure incoming AC grid voltage at ACDB", "Verify country code settings in inverter menu", "If grid voltage normal, inspect AC wiring for loose neutral"],
+      "confidence": 0.95,
+      "sourceDoc": "Luminous On-Grid Inverter Manual Rev 3.2, Section 8.4",
+      "disclaimer": "AI suggestion for advisory assistance only. Must be verified by certified solar technician."
+    }
+  }
+  ```
+- **Downstream Dependencies:** Mock AI Provider / Knowledge Base, `ai_audit_logs`.
+
+#### 26. GET /api/finance/analytics/projects/:id/profitability
+- **Owner:** Member 4
+- **Auth & RBAC:** Authenticated; Role: `Director` Only
+- **Calling Frontend:** `ProjectProfitabilityPage.jsx`
+- **Response 200 OK:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "projectId": "prj_9901",
+      "customerName": "Amit Patel",
+      "capacityKw": 3.0,
+      "contractRevenue": 215796,
+      "settledInvoicedAmount": 215796,
+      "hardwareBOMCost": 128400,
+      "technicianLaborCost": 12500,
+      "incidentalExpenses": 3200,
+      "totalProjectCost": 144100,
+      "netProfit": 71696,
+      "netMarginPercent": 33.22,
+      "marginHealth": "HEALTHY"
+    }
+  }
+  ```
+- **Error Codes:** 403 Forbidden (Non-director access).
+- **Downstream Dependencies:** `v_project_profitability` view (`invoices`, `inventory_ledger`, `technician_timesheets`, `project_expenses`).
+
+#### 27. GET /api/finance/dashboards/:role
+- **Owner:** Member 4
+- **Auth & RBAC:** Authenticated; Matching Role Required
+- **Calling Frontend:** `DirectorDashboard.jsx`, `SalesDashboard.jsx`, `OperationsDashboard.jsx`, etc.
+- **Response 200 OK:** Tailored metrics and Recharts chart datasets matching role authority.
+- **Downstream Dependencies:** Analytical SQL queries across authoritative PostgreSQL tables.

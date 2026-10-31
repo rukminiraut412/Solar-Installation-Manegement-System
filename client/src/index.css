@@ -3,23 +3,16 @@
 @tailwind utilities;
 
 :root {
-  --color-ink: #0B0D10;
-  --color-charcoal: #1A1D23;
-  --color-white: #FFFFFF;
-  --color-gray-50: #F7F8FA;
-  --color-gray-100: #EEF0F3;
-  --color-gray-200: #DDE1E7;
-  --color-gray-600: #5B6472;
-  --color-solar-blue: #1D6FE0;
-  --color-solar-blue-dark: #1859B8;
-  --color-success: #1E8E3E;
-  --color-warning: #B26A00;
-  --color-danger: #C5221F;
-  --color-ai: #5B4BC4;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  color: var(--color-ink);
-  background-color: var(--color-gray-50);
+  margin: 0;
+  display: flex;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  width: 100%;
 }

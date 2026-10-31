@@ -1,1081 +1,914 @@
-# Solar Installation Management System
-## Granular Phased Development Plan & Task Breakdown
-
-**Document Version:** 1.0  
-**Status:** Approved Architectural Baseline  
-**Authority:** `SOLAR_MANAGEMENT_SYSTEM.md` (§22 Phased Implementation Plan)  
-**Total Phases:** 9 (Phase 0 to Phase 8 in strict dependency order)
+# DEVELOPMENT PHASES & GRANULAR TASK BREAKDOWN
+**Project:** Solar Installation Management System (SunPower Solutions)  
+**Architecture:** Modular Monolith (Node.js/Express + PostgreSQL + React/Vite/Tailwind CSS)  
+**Document Version:** 1.0.0  
 
 ---
 
-## Phase 0: Platform Foundation & Architecture (Priority 0)
-*Owner: Member 1 | Prerequisite: None*
+## Phase Overview & Sequencing
 
-### TASK-0.1: Project Scaffolding, Monolith Shell & Environment Validation
-- **Exact Implementation Objective**: Initialize Vite React SPA, Express backend modular monolith, Tailwind CSS design system with SunPower tokens, and Zod environment variable validator.
-- **Files Expected to be Created**:
-  - `package.json`, `.gitignore`, `.env.example`, `vite.config.js`, `tailwind.config.js`
-  - `backend/src/index.js`, `backend/src/app.js`
-  - `backend/src/config/env.js`, `backend/src/config/constants.js`
-  - `backend/src/middleware/error.middleware.js`
-  - `backend/src/utils/response.js`, `backend/src/utils/logger.js`
-  - `frontend/index.html`, `frontend/src/main.jsx`, `frontend/src/App.jsx`, `frontend/src/index.css`
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: None.
-- **API Changes**: `GET /api/v1/health` (returns `{ status: "ok", timestamp, version }`).
-- **Frontend Screens**: Root empty shell with SunPower dark/light layout preview.
-- **Business Rules**: Monolith architecture only (no microservices); server crashes immediately on boot if any required environment variable is missing or malformed.
-- **Required Validations**: Zod schema validating `NODE_ENV`, `PORT`, `DATABASE_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`.
-- **Required Error States**: `500 CONFIG_ERROR` on boot; standard error envelope `{ error: { code, message, details, requestId } }`.
-- **Authorization Requirements**: Public endpoint.
-- **Audit Requirements**: Server startup and shutdown logged.
-- **Test Cases**: `T-ENV-01` (missing env crashes server), `T-ENV-02` (health endpoint returns 200 OK).
-- **Definition of Done**: Both frontend (`npm run dev`) and backend start cleanly; health check returns 200; Tailwind CSS builds with exact hex colors.
-- **Dependencies**: None.
+```mermaid
+graph TD
+    P1[Phase 1: Platform Foundation & Auth Harness] --> P2[Phase 2: CRM, Enquiry & Site Survey Engine]
+    P2 --> P3[Phase 3: Solar Packages, BOM Generator & Quotes]
+    P3 --> P4[Phase 4: Order Conversion & Stock Reservation]
+    P1 --> P5[Phase 5: Products, Warehouses & Serial Registry]
+    P4 --> P6[Phase 6: Dispatch Gate & Serial Barcode Scanner]
+    P5 --> P6
+    P6 --> P7[Phase 7: Technician Scheduling & Job Execution]
+    P7 --> P8[Phase 8: Testing, Photo Proof & Digital Signature]
+    P8 --> P9[Phase 9: Automated Serialized Warranty Activation]
+    P4 --> P10[Phase 10: Razorpay Test Payments & Webhook Idempotency]
+    P10 --> P11[Phase 11: Invoicing, Job Expenses & Tech Payroll]
+    P2 --> P12[Phase 12: Government Subsidy Paperwork Tracking]
+    P9 --> P13[Phase 13: Support Tickets & Warranty Billing Contracts]
+    P13 --> P14[Phase 14: AI Support Copilot & Readiness Auditor]
+    P11 --> P15[Phase 15: Unit Economics & Role-Aware Dashboards]
+    P14 --> P16[Phase 16: End-to-End System Integration & Audit]
+    P15 --> P16
+```
 
 ---
 
-### TASK-0.2: PostgreSQL Connection Pool & Monotonic Migration Runner
-- **Exact Implementation Objective**: Implement a robust PostgreSQL connection pool with transaction helper and a lightweight monotonic SQL migration runner.
-- **Files Expected to be Created**:
-  - `backend/src/config/database.js`
-  - `backend/src/scripts/migrate.js`
-  - `backend/src/migrations/001_foundation.sql`
-- **Files Allowed to be Modified**: `backend/src/app.js`.
-- **Database Changes**: Tables created: `users`, `roles`, `permissions`, `role_permissions`, `refresh_tokens`, `system_settings`, `audit_logs`, `status_history`, `idempotency_keys`.
-- **API Changes**: None (Infrastructure).
-- **Frontend Screens**: None.
-- **Business Rules**: Migrations must be monotonically sequenced and recorded in `schema_migrations`; transactions must rollback cleanly on error.
-- **Required Validations**: Database connection string syntax validation; connection retry with exponential backoff.
-- **Required Error States**: `500 DATABASE_CONNECTION_FAILED`.
-- **Authorization Requirements**: Internal DB engine.
-- **Audit Requirements**: Migration executions recorded in schema table.
-- **Test Cases**: `T-DB-01` (migration applies cleanly), `T-DB-02` (transaction rollback leaves DB unchanged on error).
-- **Definition of Done**: `npm run db:migrate` runs cleanly; database tables exist in PostgreSQL with all indexes and check constraints.
-- **Dependencies**: TASK-0.1.
+## Phase 1: Platform Foundation, Architecture Scaffold & Auth Harness
+**Lead:** Member 1  
+**Dependencies:** None
+
+### Task 1.1: Monorepo Project Scaffolding & Configuration
+- **Objective:** Establish the Node.js/Express backend, React/Vite/Tailwind CSS frontend, root scripts, git configuration, and environment variable schema.
+- **Files Created:** `backend/package.json`, `frontend/package.json`, `backend/.env.example`, `frontend/.env.example`, `backend/src/server.js`, `backend/src/app.js`, `frontend/vite.config.js`, `frontend/tailwind.config.js`, `frontend/postcss.config.js`, `frontend/index.html`, `frontend/src/index.css`.
+- **Files Modified:** None (initial bootstrap).
+- **Database Changes:** None.
+- **API Changes:** `GET /health` (returns `{ status: 'UP', timestamp, uptime }`).
+- **Frontend Screens:** Base root layout shell with Tailwind CSS typography.
+- **Business Rules:** Monolith structure; no microservices.
+- **Validations:** Node.js v18+ check, environment schema validation on boot.
+- **Error States:** 500 if mandatory environment variables are missing.
+- **Authorization:** Public endpoint for health check.
+- **Audit Req:** Server start and stop events logged.
+- **Test Cases:** TC-PLT-001 (Server boots up), TC-PLT-002 (Health endpoint returns 200).
+- **Definition of Done:** `npm install` and `npm run dev` succeed cleanly in both frontend and backend directories.
+- **Dependencies:** None.
+
+### Task 1.2: PostgreSQL Connection Pool, Migration Harness & Base Schema
+- **Objective:** Build PostgreSQL client connection pool with connection pooling, transaction wrapper, and automated migration runner executing `001_platform_foundation.sql`.
+- **Files Created:** `backend/src/config/database.js`, `backend/src/common/db.js`, `backend/src/migrations/001_platform_foundation.sql`, `backend/src/scripts/migrate.js`.
+- **Files Modified:** `backend/src/app.js`.
+- **Database Changes:** Tables created: `users`, `roles`, `user_roles`, `refresh_tokens`, `audit_logs`, `media_attachments`.
+- **API Changes:** None (database layer).
+- **Frontend Screens:** None.
+- **Business Rules:** Foreign keys, cascade constraints, indexed primary keys, strict timestamp columns (`created_at`, `updated_at`).
+- **Validations:** Pool size limits (max 20 connections), SSL configuration for production.
+- **Error States:** Database unreachable on boot triggers retry with exponential backoff and fatal exit after 5 failures.
+- **Authorization:** System/DBA level.
+- **Audit Req:** Migration version logged in `schema_migrations` table.
+- **Test Cases:** TC-DB-001 (Connection pool establishes), TC-DB-002 (Migration runner executes idempotently).
+- **Definition of Done:** `npm run migrate` runs successfully and creates all foundational tables in PostgreSQL.
+- **Dependencies:** Task 1.1.
+
+### Task 1.3: Central JWT Authentication & Refresh Token Rotation
+- **Objective:** Implement user registration, password hashing (bcrypt), login issuance of short-lived JWT (15 min) and persistent rotated refresh tokens (7 days).
+- **Files Created:** `backend/src/modules/platform/auth.controller.js`, `backend/src/modules/platform/auth.service.js`, `backend/src/modules/platform/auth.routes.js`, `backend/src/middleware/auth.middleware.js`, `frontend/src/context/AuthContext.jsx`, `frontend/src/features/auth/LoginPage.jsx`.
+- **Files Modified:** `backend/src/app.js`, `frontend/src/App.jsx`.
+- **Database Changes:** Refresh token storage with token family tracking.
+- **API Changes:** `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/auth/me`.
+- **Frontend Screens:** Login Screen with email/password, error banner, and persistent session recovery.
+- **Business Rules:** Access token contains `user_id` and `roles`; refresh tokens rotated on each refresh; replayed refresh tokens invalidate token family immediately.
+- **Validations:** Email regex, password length >= 8 characters.
+- **Error States:** 401 Invalid Credentials, 401 Expired Token, 403 Reuse Detected.
+- **Authorization:** Login/refresh endpoints public; `GET /me` requires Bearer token.
+- **Audit Req:** All login attempts, failed logins, and logouts recorded in `audit_logs`.
+- **Test Cases:** TC-AUTH-001 (Valid login), TC-AUTH-002 (Invalid password), TC-AUTH-003 (Token refresh), TC-AUTH-004 (Token reuse detection).
+- **Definition of Done:** Users can log in, receive valid JWTs, and maintain session across page refreshes.
+- **Dependencies:** Task 1.2.
+
+### Task 1.4: 5-Role RBAC & Row-Level Authorization Middleware
+- **Objective:** Implement role enforcement middleware supporting 5 distinct roles: `Director`, `Sales`, `Technician`, `Warehouse`, `Support`.
+- **Files Created:** `backend/src/middleware/rbac.middleware.js`, `frontend/src/components/shared/ProtectedRoute.jsx`, `frontend/src/layout/Sidebar.jsx`, `frontend/src/layout/AppLayout.jsx`.
+- **Files Modified:** `frontend/src/App.jsx`.
+- **Database Changes:** Role seed data populated: Director, Sales, Technician, Warehouse, Support.
+- **API Changes:** None (middleware).
+- **Frontend Screens:** Sidebar navigation dynamically filters menu items based on active user's roles.
+- **Business Rules:** Least privilege; unauthorized routes blocked with 403 Forbidden.
+- **Validations:** User must have at least one valid role attached in JWT payload.
+- **Error States:** 403 Forbidden with `{ error: 'INSUFFICIENT_PERMISSIONS', requiredRoles: [...] }`.
+- **Authorization:** Internal middleware.
+- **Audit Req:** Unauthorized access attempts logged in `audit_logs` with severity 'WARNING'.
+- **Test Cases:** TC-RBAC-001 (Technician blocked from viewing financial routes), TC-RBAC-002 (Director has omni-access).
+- **Definition of Done:** Route guards verified for all 5 roles on both API and frontend router.
+- **Dependencies:** Task 1.3.
+
+### Task 1.5: Central Immutable Audit Logging Engine & Viewer
+- **Objective:** Provide a global audit logging helper and an administrative audit viewer for the Director.
+- **Files Created:** `backend/src/middleware/audit.middleware.js`, `backend/src/modules/platform/audit.controller.js`, `backend/src/modules/platform/audit.service.js`, `frontend/src/features/auth/AuditLogView.jsx`.
+- **Files Modified:** `backend/src/app.js`.
+- **Database Changes:** `audit_logs` table schema optimized with indexes on `entity_name`, `entity_id`, `created_at`.
+- **API Changes:** `GET /api/audit-logs` (filterable by date, actor, entity, action).
+- **Frontend Screens:** Director Audit Log viewer table with JSON payload inspector.
+- **Business Rules:** Audit logs are append-only; update/delete operations on `audit_logs` are prohibited.
+- **Validations:** Payload must contain `actor_id`, `action`, `entity_name`, `entity_id`.
+- **Error States:** Audit write failure must not abort core transaction but write to backup fallback file.
+- **Authorization:** Director role only for viewing.
+- **Audit Req:** Viewing audit logs is itself logged in `audit_logs`.
+- **Test Cases:** TC-AUDIT-001 (Mutation creates audit log), TC-AUDIT-002 (Non-director gets 403).
+- **Definition of Done:** All mutating actions automatically captured in immutable audit records.
+- **Dependencies:** Task 1.4.
+
+### Task 1.6: Cloudinary Media Storage Integration & Upload Primitives
+- **Objective:** Configure Cloudinary SDK for secure media uploads (survey photos, installation proof, signatures, receipts).
+- **Files Created:** `backend/src/config/cloudinary.js`, `frontend/src/components/shared/PhotoUploader.jsx`, `frontend/src/components/shared/SignaturePad.jsx`.
+- **Files Modified:** `backend/src/app.js`.
+- **Database Changes:** `media_attachments` table linked to entity types.
+- **API Changes:** `POST /api/media/sign-upload` (generates signed parameters for direct-to-Cloudinary upload).
+- **Frontend Screens:** Reusable Photo Uploader with thumbnail preview, compression, and Signature Pad canvas.
+- **Business Rules:** Max file size 10MB; allowed types: image/jpeg, image/png, image/webp, application/pdf.
+- **Validations:** MIME type verification; file signature check.
+- **Error States:** 400 Bad Request on oversized/invalid files.
+- **Authorization:** Authenticated users.
+- **Audit Req:** Upload metadata stored in database.
+- **Test Cases:** TC-MEDIA-001 (Upload valid JPEG), TC-MEDIA-002 (Reject executable file).
+- **Definition of Done:** Reusable UI components upload media directly to Cloudinary and return secure URLs.
+- **Dependencies:** Task 1.1.
 
 ---
 
-### TASK-0.3: JWT Dual-Token Authentication & Password Hashing
-- **Exact Implementation Objective**: Build secure login, token rotation, logout, and password reset endpoints using Argon2id/bcrypt and HTTP-only cookies.
-- **Files Expected to be Created**:
-  - `backend/src/modules/auth/auth.routes.js`, `auth.controller.js`, `auth.service.js`
-  - `backend/src/middleware/auth.middleware.js`
-  - `frontend/src/api/auth.api.js`
-  - `frontend/src/pages/public/LoginPage.jsx` (`P-03`), `ForgotPassword.jsx` (`P-04`)
-- **Files Allowed to be Modified**: `backend/src/app.js`, `frontend/src/App.jsx`.
-- **Database Changes**: Populates `users` and `refresh_tokens`.
-- **API Changes**: `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `POST /auth/forgot-password`, `POST /auth/reset-password`.
-- **Frontend Screens**: Login page (`P-03`), Forgot Password page (`P-04`).
-- **Business Rules**: Access token 15 min lifetime; refresh token rotated on every use; cookie set with `httpOnly`, `Secure`, `SameSite=Strict`. Generic error messages (no account enumeration). 5 consecutive failures triggers 15-minute account lockout.
-- **Required Validations**: Email format; password min 8 characters.
-- **Required Error States**: 401 `INVALID_CREDENTIALS`, 429 `ACCOUNT_LOCKED`.
-- **Authorization Requirements**: Public endpoints; refresh endpoint requires valid refresh cookie.
-- **Audit Requirements**: Auth success, failure, lockout, and password reset logged to `audit_logs`.
-- **Test Cases**: `T-AUTH-01` (valid login), `T-AUTH-02` (bad password returns generic 401), `T-AUTH-03` (refresh token rotation).
-- **Definition of Done**: User can log in via UI, receive tokens, execute protected calls, refresh token, and log out with complete token invalidation.
-- **Dependencies**: TASK-0.2.
+## Phase 2: CRM, Public Enquiry, Deduplication & Site Survey Engine
+**Lead:** Member 2 (Assisted by Member 1 on Shared UI)  
+**Dependencies:** Phase 1
+
+### Task 2.1: Database Migration for Customer & Sales Subsystem
+- **Objective:** Deploy migration `002_customer_sales.sql` defining customers, enquiries, site surveys, and reviews.
+- **Files Created:** `backend/src/migrations/002_customer_sales.sql`.
+- **Files Modified:** None.
+- **Database Changes:** Tables created: `customers`, `enquiries`, `site_surveys`, `survey_measurements`, `survey_reviews`.
+- **API Changes:** None.
+- **Frontend Screens:** None.
+- **Business Rules:** Foreign keys to `users` (assigned sales/technician); customer phone number indexed.
+- **Validations:** Phone format (+91 or 10 digits), positive numbers for bill and roof area.
+- **Error States:** Database constraint errors handled cleanly.
+- **Authorization:** Member 2 ownership.
+- **Audit Req:** Schema migration recorded.
+- **Test Cases:** TC-DB-003 (Execute 002_customer_sales.sql cleanly).
+- **Definition of Done:** All CRM and survey tables and indexes exist in PostgreSQL.
+- **Dependencies:** Task 1.2.
+
+### Task 2.2: Public Rooftop Enquiry Intake Form & Rate Limiting
+- **Objective:** Create the public homeowner landing form for solar enquiries with anti-spam rate limiting.
+- **Files Created:** `frontend/src/features/sales/PublicEnquiryForm.jsx`, `backend/src/modules/sales/enquiry.controller.js`, `backend/src/modules/sales/enquiry.service.js`, `backend/src/modules/sales/sales.routes.js`, `backend/src/modules/sales/sales.validators.js`.
+- **Files Modified:** `backend/src/app.js`, `frontend/src/App.jsx`.
+- **Database Changes:** Inserts into `enquiries`.
+- **API Changes:** `POST /api/sales/public/enquiries`.
+- **Frontend Screens:** Branded public enquiry page: Name, Phone, Email, Address, Pincode, Average Monthly Electricity Bill (₹), Preferred System Type (On-Grid / Off-Grid).
+- **Business Rules:** New enquiries enter in status 'NEW'; immediate email/SMS acknowledgment simulated.
+- **Validations:** 10-digit Indian phone validation; monthly bill >= 500; valid email.
+- **Error States:** 429 Too Many Requests (rate limit: 5 submissions/15 min/IP); 400 Bad Request on invalid fields.
+- **Authorization:** Public access (no JWT required).
+- **Audit Req:** Submission logged with client IP and user agent.
+- **Test Cases:** TC-ENQ-001 (Valid enquiry submission), TC-ENQ-002 (Rate limit triggered).
+- **Definition of Done:** Homeowner submits form; record is created in database with 'NEW' status.
+- **Dependencies:** Task 2.1, Task 1.4.
+
+### Task 2.3: Automated Duplicate Lead Detection & Merging Workflow
+- **Objective:** Detect incoming leads matching existing phone numbers or emails, and provide sales team with a side-by-side merge dialog.
+- **Files Created:** `frontend/src/features/sales/EnquiryInboxPage.jsx`, `frontend/src/features/sales/CustomerDetailPage.jsx`.
+- **Files Modified:** `backend/src/modules/sales/enquiry.service.js`, `backend/src/modules/sales/enquiry.controller.js`.
+- **Database Changes:** Updates to `enquiries.duplicate_of_id`, `enquiries.status`.
+- **API Changes:** `GET /api/sales/enquiries`, `GET /api/sales/enquiries/duplicates`, `POST /api/sales/enquiries/:id/merge`.
+- **Frontend Screens:** Sales Enquiry Inbox with 'DUPLICATE' badge, filter tabs (New, Qualified, Survey_Scheduled, Merged), Side-by-side merge modal.
+- **Business Rules:** Duplicate detected if phone number matches exactly or email matches existing customer/enquiry; merging consolidates notes into primary customer record.
+- **Validations:** Merged ID must exist and not be self-referential.
+- **Error States:** 400 on circular merge attempt; 404 on missing record.
+- **Authorization:** Sales, Director.
+- **Audit Req:** Lead merge event logged in `audit_logs` with previous and consolidated IDs.
+- **Test Cases:** TC-ENQ-003 (Exact phone duplicate flagged), TC-ENQ-004 (Lead merge consolidates history).
+- **Definition of Done:** Sales inbox alerts on duplicates and allows one-click side-by-side merge without losing customer data.
+- **Dependencies:** Task 2.2.
+
+### Task 2.4: Preliminary Lead Qualification & Customer Record Establishment
+- **Objective:** Sales representative calls lead to verify basic parameters (shadow-free roof space >= 100 sq ft, electricity bill >= ₹1,500, grid connection stable).
+- **Files Created:** `backend/src/modules/sales/customer.controller.js`, `backend/src/modules/sales/customer.service.js`.
+- **Files Modified:** `frontend/src/features/sales/EnquiryInboxPage.jsx`, `frontend/src/features/sales/CustomerDetailPage.jsx`.
+- **Database Changes:** Creates record in `customers` upon qualification; updates `enquiries.status = 'QUALIFIED'`.
+- **API Changes:** `POST /api/sales/enquiries/:id/qualify`, `GET /api/sales/customers`, `GET /api/sales/customers/:id`.
+- **Frontend Screens:** Qualification checklist modal; Customer 360 profile page.
+- **Business Rules:** Only qualified leads with verified parameters can proceed to Site Survey scheduling.
+- **Validations:** Roof space (sq ft) > 0; bill amount > 0; grid status confirmed.
+- **Error States:** 400 Bad Request if mandatory qualification checks are unchecked.
+- **Authorization:** Sales, Director.
+- **Audit Req:** Qualification decision and agent ID logged in `audit_logs`.
+- **Test Cases:** TC-CUST-001 (Qualify lead creates customer), TC-CUST-002 (Unqualified lead rejected).
+- **Definition of Done:** Qualified lead transitions to permanent Customer dossier with full contact details.
+- **Dependencies:** Task 2.3.
+
+### Task 2.5: Site Survey Scheduling & Technician Assignment
+- **Objective:** Schedule on-site physical survey with slot booking and technician assignment.
+- **Files Created:** `frontend/src/features/sales/SurveyScheduleModal.jsx`.
+- **Files Modified:** `backend/src/modules/sales/survey.controller.js`, `backend/src/modules/sales/survey.service.js`.
+- **Database Changes:** Creates record in `site_surveys` (status = 'SCHEDULED'); updates technician schedule.
+- **API Changes:** `POST /api/sales/surveys/schedule`, `GET /api/sales/surveys/available-technicians`.
+- **Frontend Screens:** Survey Scheduling Modal with calendar date picker and technician workload indicator.
+- **Business Rules:** Survey can ONLY be scheduled for a Qualified lead/customer; technician cannot have conflicting bookings.
+- **Validations:** Survey date must be in future; assigned user must have 'Technician' role.
+- **Error States:** 409 Conflict if technician is already booked in chosen slot.
+- **Authorization:** Sales, Director.
+- **Audit Req:** Survey scheduling and assigned technician logged in `audit_logs`.
+- **Test Cases:** TC-SRV-001 (Successful survey schedule), TC-SRV-002 (Technician double-booking blocked).
+- **Definition of Done:** Site survey created with scheduled date and technician assigned; appears on technician's job queue.
+- **Dependencies:** Task 2.4.
+
+### Task 2.6: Mobile-Optimized On-Site Survey Execution & Photo Capture
+- **Objective:** Enable field technicians to enter compass direction, tilt angle, shading analysis, cable distance, and upload roof photos on-site.
+- **Files Created:** `frontend/src/features/sales/SiteSurveyExecutionForm.jsx`.
+- **Files Modified:** `backend/src/modules/sales/survey.controller.js`, `backend/src/modules/sales/survey.service.js`.
+- **Database Changes:** Inserts into `survey_measurements` and `media_attachments`; updates `site_surveys.status = 'SUBMITTED'`.
+- **API Changes:** `POST /api/sales/surveys/:id/execute`, `POST /api/sales/surveys/:id/photos`.
+- **Frontend Screens:** Mobile-friendly survey form with compass azimuth input, tilt angle selector (10°-30°), cable run length (m), multi-angle photo uploader.
+- **Business Rules:** Minimum 2 roof photos mandatory; cable distance must be specified.
+- **Validations:** Tilt angle between 0° and 90°; azimuth between 0° and 360°; cable run > 0 meters.
+- **Error States:** 400 Bad Request if photos or measurements are missing.
+- **Authorization:** Technician, Director.
+- **Audit Req:** Submission logged with technician ID and timestamp.
+- **Test Cases:** TC-SRV-003 (Submit complete survey), TC-SRV-004 (Submit without photos rejected).
+- **Definition of Done:** Technician submits survey from mobile device; status becomes 'SUBMITTED' with verified photos stored in Cloudinary.
+- **Dependencies:** Task 2.5, Task 1.6.
+
+### Task 2.7: Survey Engineering Review & Approval Gate
+- **Objective:** Engineering/Sales manager reviews survey measurements, evaluates structural feasibility, and marks Approved, Rejected, or Rework.
+- **Files Created:** `frontend/src/features/sales/SurveyApprovalPage.jsx`.
+- **Files Modified:** `backend/src/modules/sales/survey.controller.js`, `backend/src/modules/sales/survey.service.js`.
+- **Database Changes:** Creates record in `survey_reviews`; updates `site_surveys.status` ('APPROVED', 'REJECTED', 'REWORK').
+- **API Changes:** `POST /api/sales/surveys/:id/approve`, `POST /api/sales/surveys/:id/reject`, `POST /api/sales/surveys/:id/rework`.
+- **Frontend Screens:** Survey Review Screen displaying photo gallery, tilt/shading data, and review action buttons.
+- **Business Rules:** CRITICAL BUSINESS GATE: Quotation generation is strictly blocked until survey status is 'APPROVED'. If Rework is chosen, reason is mandatory and survey returns to technician queue.
+- **Validations:** Rejection/Rework requires minimum 10-character reason.
+- **Error States:** 400 Bad Request on missing comments for rejection/rework.
+- **Authorization:** Sales Manager, Director.
+- **Audit Req:** Approval/rejection decision and manager notes logged in `audit_logs`.
+- **Test Cases:** TC-SRV-005 (Approve survey opens quote creation), TC-SRV-006 (Rework status routes back to technician).
+- **Definition of Done:** Manager can review, approve, or request rework on survey; approved survey unlocks quotation engine.
+- **Dependencies:** Task 2.6.
 
 ---
 
-### TASK-0.4: Dynamic RBAC Middleware & Permission Registry
-- **Exact Implementation Objective**: Implement server-side permission check middleware and row-level access helpers for all 5 roles plus Customer portal.
-- **Files Expected to be Created**:
-  - `backend/src/middleware/rbac.middleware.js`
-  - `backend/src/modules/auth/user.routes.js`, `user.controller.js`
-  - `frontend/src/routes/ProtectedRoute.jsx`
-- **Files Allowed to be Modified**: `backend/src/modules/auth/auth.routes.js`.
-- **Database Changes**: Seeds `roles` (Admin, Sales, Warehouse, Technician, Support, Customer), `permissions`, and `role_permissions`.
-- **API Changes**: `GET /me` (returns profile, role, and permission array).
-- **Frontend Screens**: Route protection integration across shell.
-- **Business Rules**: Token holds role; permissions queried dynamically on each request. Deny by default. Row-level filters: Technicians only see assigned jobs; customers only see own records.
-- **Required Validations**: Permission string format `resource.action`.
-- **Required Error States**: 401 `UNAUTHORIZED`, 403 `FORBIDDEN`.
-- **Authorization Requirements**: Any authenticated user can call `/me`.
-- **Audit Requirements**: Permission denials logged with user ID, attempted endpoint, and IP.
-- **Test Cases**: `T-01` (calling unauthorized route returns 403 Forbidden).
-- **Definition of Done**: `requirePermission('survey.approve')` blocks non-Admin users with 403; frontend dynamically adapts navigation.
-- **Dependencies**: TASK-0.3.
+## Phase 3: Solar Packages, Automated BOM Generator & Quotation Flow
+**Lead:** Member 2  
+**Dependencies:** Phase 2
+
+### Task 3.1: Standard Solar Packages Catalog (1 kW to 5 kW On/Off Grid)
+- **Objective:** Establish standard package catalog templates for 1 kW, 2 kW, 3 kW, 4 kW, 5 kW systems in On-Grid and Off-Grid configurations.
+- **Files Created:** `backend/src/migrations/002_packages.sql` (or integrated into 002), `backend/src/modules/sales/package.service.js`.
+- **Files Modified:** `backend/src/modules/sales/sales.routes.js`.
+- **Database Changes:** Tables created: `packages`, `package_components`.
+- **API Changes:** `GET /api/sales/packages`, `GET /api/sales/packages/:id`.
+- **Frontend Screens:** Package Selector component in Quotation Builder.
+- **Business Rules:** System size strictly 1.0 kW to 5.0 kW; grid types strictly 'ON_GRID' (grid-tied, no battery) or 'OFF_GRID' (includes battery backup).
+- **Validations:** Capacity must be between 1.0 and 5.0 in increments of 1 kW; base price > 0.
+- **Error States:** 404 on invalid package ID.
+- **Authorization:** Sales, Director.
+- **Audit Req:** Package template modifications logged.
+- **Test Cases:** TC-PKG-001 (Fetch 3 kW Off-Grid package spec).
+- **Definition of Done:** Packages API returns standardized component specifications for all 10 standard configurations.
+- **Dependencies:** Task 2.1.
+
+### Task 3.2: Automated Bill of Materials (BOM) Generation Engine
+- **Objective:** Automatically calculate the complete parts list (panels, inverter, stands, switches, wires, safety parts) based on package capacity and surveyed cable distance.
+- **Files Created:** `backend/src/modules/sales/bomGenerator.service.js`.
+- **Files Modified:** `backend/src/modules/sales/quotation.service.js`.
+- **Database Changes:** `quotation_items` table populated from BOM engine.
+- **API Changes:** `POST /api/sales/quotations/generate-bom`.
+- **Frontend Screens:** BOM interactive table inside Quotation Builder.
+- **Business Rules:** Automatic BOM calculation:
+  - 1 kW = 2x 540W panels, 1x 1kW inverter, 1 structure set, 20m cable, 1 earthing kit.
+  - 3 kW = 6x 540W panels, 1x 3.3kW inverter, 2 structure sets, 35m cable, 2 earthing rods.
+  - 5 kW = 10x 540W panels, 1x 5kW inverter, 3 structure sets, 50m cable, 2 earthing rods.
+  - Off-Grid adds: battery bank (e.g. 48V 150Ah) and charge controller.
+- **Validations:** Cable distance adjusted if survey measurement exceeds default package cable length.
+- **Error States:** 400 Bad Request if surveyed cable distance is unfeasible (> 100m without line-loss check).
+- **Authorization:** Sales, Director.
+- **Audit Req:** Generated BOM items logged against quotation version.
+- **Test Cases:** TC-BOM-001 (3 kW On-Grid auto-generates 6 panels, 1 inverter, structure, wiring), TC-BOM-002 (Off-Grid adds battery and controller).
+- **Definition of Done:** Selecting package capacity automatically yields complete BOM with zero missing small parts.
+- **Dependencies:** Task 3.1, Task 2.7.
+
+### Task 3.3: Quotation Builder, PDF Engine & Delivery
+- **Objective:** Construct comprehensive quotation with itemized hardware, installation labor, GST calculation, subsidy estimates, terms, and branded PDF generation.
+- **Files Created:** `frontend/src/features/sales/QuotationBuilderPage.jsx`, `backend/src/modules/sales/quotation.controller.js`, `backend/src/modules/sales/quotation.service.js`.
+- **Files Modified:** `backend/src/modules/sales/sales.routes.js`.
+- **Database Changes:** Tables created: `quotations`, `quotation_versions`, `quotation_items`.
+- **API Changes:** `POST /api/sales/quotations`, `GET /api/sales/quotations/:id`, `GET /api/sales/quotations/:id/pdf`, `POST /api/sales/quotations/:id/send`.
+- **Frontend Screens:** Quotation Builder with price summary, discount limits, validity period (15 days), and PDF preview.
+- **Business Rules:** Quotation CANNOT be created if site survey is not in 'APPROVED' status. Maximum sales discount capped at 10% without Director approval.
+- **Validations:** Expiration date > current date; grand total = sum of BOM + labor + tax - discount.
+- **Error States:** 403 Forbidden if survey is unapproved; 400 if discount exceeds threshold.
+- **Authorization:** Sales, Director.
+- **Audit Req:** Quote creation, edits, and delivery logged with version number.
+- **Test Cases:** TC-QTE-001 (Create quotation for approved survey), TC-QTE-002 (Blocked if survey pending), TC-QTE-003 (Generate branded PDF).
+- **Definition of Done:** Quotation PDF generated and email/link sent to customer with unique token.
+- **Dependencies:** Task 3.2.
+
+### Task 3.4: Customer Quotation Review & Digital Acceptance Flow
+- **Objective:** Dedicated customer-facing portal page for reviewing quotation details, BOM, payment schedule, and digitally accepting or declining the quote.
+- **Files Created:** `frontend/src/features/sales/CustomerQuoteAcceptPage.jsx`.
+- **Files Modified:** `backend/src/modules/sales/quotation.controller.js`, `backend/src/modules/sales/quotation.service.js`.
+- **Database Changes:** Updates `quotations.status = 'ACCEPTED'`; creates `quotation_acceptance` record.
+- **API Changes:** `GET /api/sales/public/quotations/:token`, `POST /api/sales/public/quotations/:token/accept`, `POST /api/sales/public/quotations/:token/decline`.
+- **Frontend Screens:** Clean, responsive customer quotation view with itemized cards, subsidy breakdown, terms checkbox, and 'Accept & Sign' or 'Decline' buttons.
+- **Business Rules:** CRITICAL BUSINESS GATE: Accepting a quotation advances Quote to 'ACCEPTED' and automatically triggers Order/Project Creation. Expired quotes cannot be accepted.
+- **Validations:** Digital acceptance requires full name and confirmation checkbox.
+- **Error States:** 400 if quote expired; 409 if already accepted.
+- **Authorization:** Public access via secure cryptographically random token.
+- **Audit Req:** Customer IP address, acceptance timestamp, and token logged.
+- **Test Cases:** TC-QTE-004 (Customer accepts quote; status becomes ACCEPTED), TC-QTE-005 (Decline quote captures feedback).
+- **Definition of Done:** Customer accepts quote online; system marks quote accepted and emits event for Order creation.
+- **Dependencies:** Task 3.3.
 
 ---
 
-### TASK-0.5: Append-Only Central Audit Logging & Status History Engine
-- **Exact Implementation Objective**: Construct the immutable audit log and status history recording service.
-- **Files Expected to be Created**:
-  - `backend/src/modules/audit/audit.service.js`, `audit.controller.js`, `audit.routes.js`
-  - `backend/src/middleware/audit.middleware.js`
-  - `frontend/src/pages/staff/settings/AuditLogPage.jsx` (`S-108`)
-- **Files Allowed to be Modified**: `backend/src/app.js`.
-- **Database Changes**: Enforces trigger/rule preventing `UPDATE` or `DELETE` on `audit_logs`.
-- **API Changes**: `GET /audit-logs` (Admin only).
-- **Frontend Screens**: Audit Viewer (`S-108`) with filters by entity, actor, and date.
-- **Business Rules**: All consequential actions must write an audit record with `old_value`, `new_value`, `reason`, and actor metadata. No hard deletes.
-- **Required Validations**: Actor ID and entity type cannot be null.
-- **Required Error States**: 403 Forbidden for non-Admin access.
-- **Authorization Requirements**: Admin only.
-- **Audit Requirements**: Self-auditing append-only engine.
-- **Test Cases**: `T-49` (audit entry written on status change), `T-AUD-02` (direct SQL UPDATE on audit_logs fails).
-- **Definition of Done**: Admin can browse complete, immutable audit logs; non-admins receive 403; database strictly prohibits log tampering.
-- **Dependencies**: TASK-0.4.
+## Phase 4: Order Conversion, Payment Orders & Stock Reservation
+**Lead:** Member 2 (Order Creation) + Member 3 (Stock Reservation) + Member 4 (Advance Payment Order)  
+**Dependencies:** Phase 3
+
+### Task 4.1: Order & Project Initialization Engine
+- **Objective:** Automatically convert accepted quotation into an active Order and Project with project milestones.
+- **Files Created:** `backend/src/modules/sales/order.service.js`, `backend/src/modules/sales/order.controller.js`.
+- **Files Modified:** `backend/src/modules/sales/quotation.service.js`.
+- **Database Changes:** Tables created: `orders`, `projects`, `project_milestones`.
+- **API Changes:** `POST /api/sales/orders/create-from-quote`, `GET /api/sales/orders/:id`, `GET /api/sales/projects/:id`.
+- **Frontend Screens:** Project Overview tab in Customer Profile.
+- **Business Rules:** CRITICAL GATE: Order creation REQUIRES quotation acceptance. Order contains target system capacity, BOM snapshot, and project milestones. Initial status = 'PENDING_ADVANCE'.
+- **Validations:** Quotation status must be strictly 'ACCEPTED'.
+- **Error States:** 400 Bad Request if quote is not accepted or already ordered.
+- **Authorization:** System automated / Sales Executive / Director.
+- **Audit Req:** Order created with reference to quotation ID, customer ID, and initial total.
+- **Test Cases:** TC-ORD-001 (Quote acceptance spawns Order and Project), TC-ORD-002 (Duplicate conversion blocked).
+- **Definition of Done:** Order and Project records created with status 'PENDING_ADVANCE'.
+- **Dependencies:** Task 3.4.
+
+### Task 4.2: Automated BOM Stock Reservation & Shortage Flagging
+- **Objective:** Lock required BOM components in warehouse inventory to prevent double-allocation; flag shortages if on-hand stock is insufficient.
+- **Files Created:** `backend/src/modules/operations/inventory.service.js` (reservation methods).
+- **Files Modified:** `backend/src/modules/sales/order.service.js`.
+- **Database Changes:** Inserts into `stock_reservations`; updates `inventory_ledger`.
+- **API Changes:** `POST /api/operations/projects/:id/reserve-stock`, `GET /api/operations/inventory/shortages`.
+- **Frontend Screens:** Shortage warning banner on Project card; Warehouse shortage queue.
+- **Business Rules:** CRITICAL GATE: Stock cannot be reserved beyond Available = On-Hand - Existing Reservations. If shortage occurs, status = 'SHORTAGE_FLAGGED' and procurement task created.
+- **Validations:** Quantity reserved must match BOM requirement.
+- **Error States:** 409 Conflict with shortage details (SKU, deficit amount).
+- **Authorization:** Warehouse Manager, System automated.
+- **Audit Req:** Stock reservation transaction logged with project ID.
+- **Test Cases:** TC-INV-001 (Reserve available stock succeeds), TC-INV-002 (Shortage flagged when inventory insufficient).
+- **Definition of Done:** Inventory reservation created; available stock decremented; shortage alert raised if deficit exists.
+- **Dependencies:** Task 4.1.
 
 ---
 
-### TASK-0.6: Cloudinary File Storage Service & Signed Parameter Provider
-- **Exact Implementation Objective**: Implement direct-to-Cloudinary signed upload parameter generation and asset confirmation.
-- **Files Expected to be Created**:
-  - `backend/src/config/cloudinary.js`
-  - `backend/src/modules/files/file.routes.js`, `file.controller.js`, `file.service.js`
-  - `frontend/src/components/common/FileUpload.jsx`
-- **Files Allowed to be Modified**: `backend/src/app.js`.
-- **Database Changes**: Table `files` (provider_public_id, purpose, owner_entity_type, owner_entity_id, uploaded_by, bytes, mime).
-- **API Changes**: `POST /files/sign-upload`, `POST /files/confirm`.
-- **Frontend Screens**: Reusable photo and document upload UI with progress indicator and retry queue.
-- **Business Rules**: Client never touches Cloudinary API Secret. Only allowed MIME types (`image/jpeg`, `image/png`, `application/pdf`). Max size: 10MB photos, 2MB signatures. Files referenced by provider public ID, delivered via signed temporary URLs.
-- **Required Validations**: MIME type allowlist; file size limit check.
-- **Required Error States**: 400 `INVALID_FILE_TYPE`, 400 `FILE_TOO_LARGE`.
-- **Authorization Requirements**: Authenticated users.
-- **Audit Requirements**: File uploads logged with purpose and owner entity.
-- **Test Cases**: `T-FILE-01` (successful signed upload param generation), `T-FILE-02` (disallowed file type rejected).
-- **Definition of Done**: Frontend uploads photo directly to Cloudinary using backend-signed token; backend confirms file record in database.
-- **Dependencies**: TASK-0.4.
+## Phase 5: Products Catalog, Warehouse Receipts & Serial Registry
+**Lead:** Member 3  
+**Dependencies:** Phase 1
+
+### Task 5.1: Database Migration for Operations & Inventory Subsystem
+- **Objective:** Deploy migration `003_operations_fulfilment.sql` defining products, inventory ledger, warehouses, serial registry, jobs, and warranties.
+- **Files Created:** `backend/src/migrations/003_operations_fulfilment.sql`.
+- **Files Modified:** None.
+- **Database Changes:** Tables created: `products`, `product_categories`, `warehouses`, `inventory_ledger`, `serial_registry`, `stock_receipts`, `stock_receipt_items`, `dispatch_orders`, `technicians`, `installation_jobs`, `installation_checkpoints`, `installation_tests`, `installation_photos`, `warranty_records`.
+- **API Changes:** None.
+- **Frontend Screens:** None.
+- **Business Rules:** Double-entry inventory ledger; serial uniqueness constraints; foreign key constraints.
+- **Validations:** Category IDs valid; SKU unique.
+- **Error States:** SQL migration errors handled.
+- **Authorization:** Member 3 ownership.
+- **Audit Req:** Migration recorded.
+- **Test Cases:** TC-DB-004 (Execute 003_operations_fulfilment.sql cleanly).
+- **Definition of Done:** All operational and inventory tables exist in PostgreSQL.
+- **Dependencies:** Task 1.2.
+
+### Task 5.2: Product Master Catalog & SKU Management
+- **Objective:** Manage product definitions, categories (Panels, Inverters, Batteries, Mounting, Electrical), specifications, and standard unit costs.
+- **Files Created:** `frontend/src/features/operations/ProductCatalogPage.jsx`, `backend/src/modules/operations/inventory.controller.js`, `backend/src/modules/operations/inventory.service.js`, `backend/src/modules/operations/operations.routes.js`, `backend/src/modules/operations/operations.validators.js`.
+- **Files Modified:** `backend/src/app.js`, `frontend/src/App.jsx`.
+- **Database Changes:** Inserts and updates to `products` and `product_categories`.
+- **API Changes:** `GET /api/operations/products`, `POST /api/operations/products`, `PUT /api/operations/products/:id`.
+- **Frontend Screens:** Product Catalog Page with category filters, SKU search, unit costs, and serialized flag.
+- **Business Rules:** High-value items (Inverters, Batteries, Charge Controllers) MUST be marked `is_serialized = true`.
+- **Validations:** SKU must be unique uppercase alphanumeric string; cost price >= 0.
+- **Error States:** 409 Conflict on duplicate SKU; 400 Bad Request on invalid category.
+- **Authorization:** Warehouse Manager, Director.
+- **Audit Req:** Product creation and cost changes logged in `audit_logs`.
+- **Test Cases:** TC-PRD-001 (Create serialized inverter product), TC-PRD-002 (Duplicate SKU blocked).
+- **Definition of Done:** Products viewable and manageable by warehouse team; serialized flag accurately set.
+- **Dependencies:** Task 5.1.
+
+### Task 5.3: Goods Received Note (GRN) & Inbound Serial Number Importer
+- **Objective:** Record incoming vendor stock deliveries with Goods Received Notes and register individual serial numbers for high-value items.
+- **Files Created:** `frontend/src/features/operations/StockReceiptPage.jsx`, `frontend/src/features/operations/WarehouseInventoryPage.jsx`.
+- **Files Modified:** `backend/src/modules/operations/inventory.controller.js`, `backend/src/modules/operations/inventory.service.js`.
+- **Database Changes:** Inserts into `stock_receipts`, `stock_receipt_items`, `inventory_ledger`, and `serial_registry`.
+- **API Changes:** `POST /api/operations/inventory/receipts`, `POST /api/operations/inventory/serials/batch`.
+- **Frontend Screens:** Stock Receipt (GRN) form with vendor name, invoice number, item selector, and bulk serial paste/scan textarea.
+- **Business Rules:** Total serialized entries must exactly equal received quantity for serialized products; serial numbers enter in status 'IN_WAREHOUSE'.
+- **Validations:** Serial number uniqueness check across entire `serial_registry` table.
+- **Error States:** 409 Conflict if any serial number is already registered in the system.
+- **Authorization:** Warehouse Manager, Director.
+- **Audit Req:** Stock receipt and ledger credit logged with receiving officer ID.
+- **Test Cases:** TC-INV-003 (Receive 10 inverters and register 10 serial numbers), TC-INV-004 (Duplicate serial rejected).
+- **Definition of Done:** Inbound stock updates warehouse ledger and registers unique serial numbers ready for dispatch.
+- **Dependencies:** Task 5.2.
 
 ---
 
-### TASK-0.7: System Settings Repository & Notification Outbox Fallback
-- **Exact Implementation Objective**: Implement configuration key-value store for unconfirmed policy items [NC] and an in-app notification engine with simulated outbox.
-- **Files Expected to be Created**:
-  - `backend/src/modules/settings/settings.routes.js`, `settings.controller.js`, `settings.service.js`
-  - `backend/src/modules/notifications/notification.routes.js`, `notification.controller.js`, `notification.service.js`
-  - `frontend/src/pages/staff/settings/NotificationOutboxPage.jsx` (`S-109`)
-- **Files Allowed to be Modified**: `backend/src/app.js`.
-- **Database Changes**: Tables `system_settings`, `notifications`, `notification_outbox`.
-- **API Changes**: `GET /settings/:group`, `PATCH /settings/:group`, `GET /notifications`, `PATCH /notifications/:id/read`, `GET /admin/notification-outbox`.
-- **Frontend Screens**: Notification Outbox (`S-109`), header notification drawer.
-- **Business Rules**: Settings manage [NC] items (advance %, payment gates, warranty start event). Modifications audited with old/new values. Notifications deliver in-app; external channels logged as `Simulated - not sent` in demo mode.
-- **Required Validations**: Zod schema per settings group.
-- **Required Error States**: 400 `INVALID_SETTINGS_PAYLOAD`.
-- **Authorization Requirements**: Admin for settings; users for own notifications.
-- **Audit Requirements**: Settings changes audited with actor ID and diff.
-- **Test Cases**: `T-SET-01` (admin updates payment policy), `T-NOTIF-02` (simulated notification captured in outbox).
-- **Definition of Done**: Settings can be updated via API/UI; in-app alerts trigger reliably; simulated messages appear in outbox.
-- **Dependencies**: TASK-0.5.
+## Phase 6: Dispatch Verification & Serial Barcode Scanning Gate
+**Lead:** Member 3  
+**Dependencies:** Phase 4, Phase 5
+
+### Task 6.1: Warehouse Dispatch Order Initialization
+- **Objective:** Create a dispatch packing manifest for confirmed orders where advance payment has been verified.
+- **Files Created:** `backend/src/modules/operations/dispatch.controller.js`, `backend/src/modules/operations/dispatch.service.js`.
+- **Files Modified:** `backend/src/modules/operations/operations.routes.js`.
+- **Database Changes:** Tables created: `dispatch_orders`, `dispatch_items`.
+- **API Changes:** `POST /api/operations/dispatch/create`, `GET /api/operations/dispatch/:id`.
+- **Frontend Screens:** Dispatch Queue on Warehouse Dashboard.
+- **Business Rules:** Dispatch order CANNOT be created if project advance payment is unverified. Dispatch order items pull from reserved BOM.
+- **Validations:** Target project must be in 'ADVANCE_PAID' status.
+- **Error States:** 403 Forbidden if advance payment is unpaid.
+- **Authorization:** Warehouse Manager.
+- **Audit Req:** Dispatch order creation logged.
+- **Test Cases:** TC-DSP-001 (Create dispatch manifest for paid project), TC-DSP-002 (Blocked if advance unpaid).
+- **Definition of Done:** Packing manifest generated listing reserved quantities and serialized slots to be scanned.
+- **Dependencies:** Task 4.2.
+
+### Task 6.2: Serial Number Barcode/QR Scanner & Verification Gate
+- **Objective:** Provide camera/barcode scanner interface to verify and attach individual serial numbers before dispatch.
+- **Files Created:** `frontend/src/features/operations/DispatchScannerPage.jsx`, `backend/src/modules/operations/serialRegistry.service.js`.
+- **Files Modified:** `backend/src/modules/operations/dispatch.controller.js`, `backend/src/modules/operations/dispatch.service.js`.
+- **Database Changes:** Updates `serial_registry.status = 'ASSIGNED_TO_PROJECT'`, `serial_registry.project_id`, `serial_registry.dispatch_id`.
+- **API Changes:** `POST /api/operations/dispatch/:id/verify-serial`.
+- **Frontend Screens:** Mobile-friendly Barcode/QR camera scanning interface with audio beep, green tick verification, and remaining serials count.
+- **Business Rules:** CRITICAL BUSINESS GATE:
+  1. Every inverter, battery, and charge controller must have its unique serial scanned.
+  2. Scanned serial must exist in warehouse in status 'IN_WAREHOUSE'.
+  3. Scanned serial must NOT be assigned to any other project.
+  4. Scanned serial must match the exact product model in the BOM.
+- **Validations:** Serial string validation; duplicate scan rejection.
+- **Error States:** 400 Mismatched product model; 409 Serial already assigned elsewhere; 404 Serial unknown.
+- **Authorization:** Warehouse Manager.
+- **Audit Req:** Scanned serial, scanner user ID, timestamp recorded in `serial_audit_history`.
+- **Test Cases:** TC-DSP-003 (Scan valid inverter attaches to dispatch), TC-DSP-004 (Scan already assigned serial rejected).
+- **Definition of Done:** All mandatory serialized units scanned and verified against order BOM.
+- **Dependencies:** Task 6.1.
+
+### Task 6.3: Dispatch Confirmation & Material Transit Departure
+- **Objective:** Confirm truck departure with verified serials, update inventory ledger to 'In_Transit', and issue delivery challan.
+- **Files Created:** `frontend/src/features/operations/SerialTrackerPage.jsx`.
+- **Files Modified:** `backend/src/modules/operations/dispatch.controller.js`, `backend/src/modules/operations/dispatch.service.js`.
+- **Database Changes:** Updates `dispatch_orders.status = 'DISPATCHED'`, `serial_registry.status = 'IN_TRANSIT'`, `inventory_ledger` (debit on-hand, credit transit).
+- **API Changes:** `POST /api/operations/dispatch/:id/confirm`, `GET /api/operations/serials/:serialNumber/trace`.
+- **Frontend Screens:** Dispatch confirmation summary with driver/vehicle details; 360 Serial Tracker lookup page.
+- **Business Rules:** CRITICAL GATE: System strictly blocks dispatch confirmation if any serialized item is missing or unverified.
+- **Validations:** Vehicle number, driver phone, delivery address confirmed.
+- **Error States:** 400 Bad Request if serialized requirements are not 100% fulfilled.
+- **Authorization:** Warehouse Manager.
+- **Audit Req:** Full dispatch audit: truck details, driver, list of serial numbers, dispatched by.
+- **Test Cases:** TC-DSP-005 (Confirm complete dispatch transitions to IN_TRANSIT), TC-DSP-006 (Serial lookup traces to project).
+- **Definition of Done:** Truck leaves warehouse; stock marked In_Transit; serials traceable; delivery challan PDF printed.
+- **Dependencies:** Task 6.2.
 
 ---
 
-### TASK-0.8: SunPower Shared Design System & Layout Shell
-- **Exact Implementation Objective**: Build accessible shared React UI components adhering strictly to SunPower design tokens (§12.3) and application layout shells.
-- **Files Expected to be Created**:
-  - `frontend/src/components/common/Button.jsx`, `Input.jsx`, `Table.jsx`, `Badge.jsx`, `Modal.jsx`, `Card.jsx`, `SignaturePad.jsx`, `Skeleton.jsx`
-  - `frontend/src/components/layout/PublicNavbar.jsx`, `StaffSidebar.jsx`, `PortalHeader.jsx`, `RoleLayout.jsx`
-  - `frontend/src/pages/public/LandingPage.jsx` (`P-01`)
-- **Files Allowed to be Modified**: `frontend/src/App.jsx`.
-- **Database Changes**: None.
-- **API Changes**: None.
-- **Frontend Screens**: Landing Page (`P-01`), Staff Layout Shell, Customer Portal Shell.
-- **Business Rules**: Strict token adherence (`--color-ink`: `#0B0D10`, `--color-charcoal`: `#1A1D23`, `--color-solar-blue`: `#1D6FE0`, etc.). Interactive elements require hover, focus-visible (2px outline), active, disabled, loading, and error states. Touch targets min 44x44px. Persistent demo banner displayed.
-- **Required Validations**: Client-side WCAG contrast verification; keyboard operability.
-- **Required Error States**: Empty state and loading skeleton support for all components.
-- **Authorization Requirements**: Public landing page; role layouts wrapped in guards.
-- **Audit Requirements**: None.
-- **Test Cases**: `T-UI-01` (keyboard navigation through landing page), `T-UI-02` (interactive states present on all buttons).
-- **Definition of Done**: High-aesthetic, responsive landing page and staff navigation shell operational with zero Tailwind styling warnings.
-- **Dependencies**: TASK-0.1.
+## Phase 7: Technician Scheduling & Mobile Rooftop Job Execution
+**Lead:** Member 3  
+**Dependencies:** Phase 6
+
+### Task 7.1: 15-Technician Roster, Availability & Crew Assignment Board
+- **Objective:** Manage SunPower's 15-technician roster, skill sets (Electrical, Structure, Helper), and assign 2-3 technician crews to installation jobs.
+- **Files Created:** `frontend/src/features/operations/TechnicianRosterPage.jsx`, `backend/src/modules/operations/technician.controller.js`, `backend/src/modules/operations/technician.service.js`.
+- **Files Modified:** `backend/src/modules/operations/operations.routes.js`.
+- **Database Changes:** Tables created: `technicians`, `technician_assignments`, `crew_teams`.
+- **API Changes:** `GET /api/operations/technicians`, `GET /api/operations/technicians/availability`, `POST /api/operations/installations/schedule`.
+- **Frontend Screens:** Technician Roster Board (Gantt calendar style) showing daily assignments across the 15 technicians.
+- **Business Rules:** Crew must include at least one Certified Electrical Technician. Prevents scheduling technicians who are on leave or already assigned.
+- **Validations:** Minimum 2 technicians per rooftop installation; date >= dispatch arrival date.
+- **Error States:** 409 Conflict if any crew member is double-booked; 400 if electrical lead missing.
+- **Authorization:** Operations Lead, Director.
+- **Audit Req:** Crew assignment and lead technician logged in `audit_logs`.
+- **Test Cases:** TC-SCH-001 (Assign 3-person crew to installation), TC-SCH-002 (Reject crew without electrical lead).
+- **Definition of Done:** Installation job scheduled with valid crew; visible on technician mobile dashboard.
+- **Dependencies:** Task 5.1, Task 6.3.
+
+### Task 7.2: Mobile-First Rooftop Installation Job Card & Checklist
+- **Objective:** Provide technicians on the roof with a responsive mobile interface to start the job, record timestamps, and check off hardware installation milestones.
+- **Files Created:** `frontend/src/features/operations/InstallationJobMobilePage.jsx`, `backend/src/modules/operations/installation.controller.js`, `backend/src/modules/operations/installation.service.js`.
+- **Files Modified:** `backend/src/modules/operations/operations.routes.js`.
+- **Database Changes:** Inserts and updates to `installation_jobs`, `installation_checkpoints`.
+- **API Changes:** `POST /api/operations/installations/:id/start`, `POST /api/operations/installations/:id/checkpoint`.
+- **Frontend Screens:** Mobile Job Card: System size banner, Start Job button, step-by-step checklist (Mounting stands, laying panels, wiring boxes, inverter/battery placement, earthing pit).
+- **Business Rules:** Technician must confirm system size matches order before starting; hardware checklist items must be checked sequentially.
+- **Validations:** Job start timestamp recorded; checklist items cannot be skipped.
+- **Error States:** 400 Bad Request on invalid checkpoint sequence.
+- **Authorization:** Field Technician, Operations Lead.
+- **Audit Req:** Job start and milestone checkpoints logged with timestamp.
+- **Test Cases:** TC-JOB-001 (Start job records start timestamp), TC-JOB-002 (Complete checklist steps).
+- **Definition of Done:** Technicians record installation progress step-by-step on phone/tablet with live duration tracking.
+- **Dependencies:** Task 7.1.
 
 ---
 
-## Phase 1: Customer and Sales Management (Priority 1)
-*Owner: Member 2 | Prerequisite: Phase 0*
+## Phase 8: Power Generation Testing, Proof Photos & Handover Signature
+**Lead:** Member 3 (Assisted by Member 1 on Signature & Media)  
+**Dependencies:** Phase 7
 
-### TASK-1.1: Public Enquiry Submission with Internal Duplicate Detection
-- **Exact Implementation Objective**: Build the public enquiry intake form with IP rate limiting and backend duplicate matching.
-- **Files Expected to be Created**:
-  - `backend/src/migrations/020_customers_enquiries.sql`
-  - `backend/src/modules/enquiries/enquiry.public.routes.js`, `enquiry.controller.js`, `enquiry.service.js`
-  - `frontend/src/pages/public/EnquiryPage.jsx` (`P-02`)
-  - `frontend/src/api/sales.api.js`
-- **Files Allowed to be Modified**: None (routes mounted via Member 1 integration or modular router).
-- **Database Changes**: Tables `customers`, `enquiries`. Indices on `phone_norm` and `email`.
-- **API Changes**: `POST /public/enquiries`.
-- **Frontend Screens**: Public Enquiry Form (`P-02`).
-- **Business Rules**: Rate limit per IP; normalize phone to E.164; match existing phone/email; flag duplicate candidate internally without exposing customer data to the public; generate `ENQ-` and `CUS-` codes.
-- **Required Validations**: Name (2–120 chars), valid phone or email, monthly bill ≥ 0, capacity > 0.
-- **Required Error States**: 400 `VALIDATION_ERROR`, 429 `TOO_MANY_REQUESTS`.
-- **Authorization Requirements**: Public.
-- **Audit Requirements**: Enquiry creation logged with IP.
-- **Test Cases**: `T-02` (duplicate phone flags duplicate enquiry), `T-03` (spam burst triggers rate limit).
-- **Definition of Done**: Public user can submit enquiry, receive reference code, and view confirmation; database records lead and internal duplicate flag.
-- **Dependencies**: TASK-0.4, TASK-0.7.
+### Task 8.1: Power Generation & Electrical Safety Testing Validation
+- **Objective:** Validate on-site electrical parameters (open circuit voltage Voc, short circuit current Isc, inverter active generation in kW, earthing pit resistance in Ohms).
+- **Files Created:** `frontend/src/features/operations/GenerationTestingForm.jsx`.
+- **Files Modified:** `backend/src/modules/operations/installation.controller.js`, `backend/src/modules/operations/installation.service.js`.
+- **Database Changes:** Tables created: `installation_tests`.
+- **API Changes:** `POST /api/operations/installations/:id/testing`.
+- **Frontend Screens:** Testing Form with input fields for Voc (V), Isc (A), Inverter Power Generation (kW), Grid Voltage (V), Earthing Resistance (Ohms).
+- **Business Rules:** CRITICAL BUSINESS GATE:
+  1. Earthing resistance MUST be <= 5.0 Ohms.
+  2. Inverter generation must be > 0.0 kW during daylight hours.
+  3. If tests fail safety thresholds, system BLOCKS completion and flags job for rework.
+- **Validations:** Numeric validation; threshold range checking.
+- **Error States:** 422 Unprocessable Entity if safety parameters fail (e.g. earthing = 12 Ohms).
+- **Authorization:** Field Technician.
+- **Audit Req:** Test instrument readings, tester name, test timestamp logged.
+- **Test Cases:** TC-TST-001 (Valid test passes within thresholds), TC-TST-002 (Failed earthing resistance triggers rework).
+- **Definition of Done:** Test readings validated against safety rules; passing test unlocks photo proof step.
+- **Dependencies:** Task 7.2.
 
----
+### Task 8.2: Mandatory Installation Proof Photos Upload
+- **Objective:** Enforce uploading clear photographic proof of the finished installation across 4 mandatory angles before handover can occur.
+- **Files Created:** `backend/src/modules/operations/installationPhoto.service.js`.
+- **Files Modified:** `frontend/src/features/operations/InstallationJobMobilePage.jsx`.
+- **Database Changes:** Inserts into `installation_photos`.
+- **API Changes:** `POST /api/operations/installations/:id/photos`, `GET /api/operations/installations/:id/photos`.
+- **Frontend Screens:** 4 Mandatory Photo Upload Slots with live preview:
+  1. Panels & Roof Mounting Structure
+  2. Inverter & DC/AC Distribution Boxes
+  3. Battery Bank (Off-Grid) / Charge Controller
+  4. Earthing Pit & Ground Wire Connection
+- **Business Rules:** Handover signature is STRICTLY LOCKED until all 4 mandatory photo angles are uploaded and verified.
+- **Validations:** File must be valid image; min 4 distinct photo categories.
+- **Error States:** 400 Bad Request if trying to proceed to signature with missing photos.
+- **Authorization:** Field Technician.
+- **Audit Req:** Upload metadata, image URLs, and technician ID logged.
+- **Test Cases:** TC-PHT-001 (Upload all 4 photo categories unlocks signature), TC-PHT-002 (Missing photo prevents handover).
+- **Definition of Done:** All 4 required installation photos uploaded to Cloudinary and associated with job record.
+- **Dependencies:** Task 8.1, Task 1.6.
 
-### TASK-1.2: Customer Directory, Profile 360 Timeline & Admin Merge
-- **Exact Implementation Objective**: Implement staff customer management, unified customer timeline, duplicate review, and soft merge engine.
-- **Files Expected to be Created**:
-  - `backend/src/modules/customers/customer.routes.js`, `customer.controller.js`, `customer.service.js`
-  - `frontend/src/pages/staff/customers/CustomerListPage.jsx` (`S-10`)
-  - `frontend/src/pages/staff/customers/CustomerDetailPage.jsx` (`S-12`)
-  - `frontend/src/pages/staff/customers/DuplicateMergePage.jsx` (`S-15`)
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Trigram index on `customers.full_name` and `address`.
-- **API Changes**: `GET /customers`, `POST /customers`, `GET /customers/:id`, `PATCH /customers/:id`, `GET /customers/:id/timeline`, `POST /customers/:id/merge`.
-- **Frontend Screens**: Customer List (`S-10`), Detail & Timeline (`S-12`), Merge (`S-15`).
-- **Business Rules**: Creating customer with existing phone returns 409 unless link/override reason provided. Merging re-points all foreign keys, sets `merged_into_id`, preserves history, never deletes. Unified timeline aggregates enquiries, surveys, quotes, orders, jobs, warranties, and cases.
-- **Required Validations**: Phone normalization; merge target != source.
-- **Required Error States**: 409 `DUPLICATE_CANDIDATE`, 404 `CUSTOMER_NOT_FOUND`.
-- **Authorization Requirements**: Sales/Support/Admin: Read/Write; Admin: Merge approval.
-- **Audit Requirements**: Overrides and merges audited with Admin ID and reason.
-- **Test Cases**: `T-CUS-02` (admin merge re-points linked records cleanly).
-- **Definition of Done**: Staff can search customers, view full timeline, resolve duplicate candidates, and merge duplicates safely.
-- **Dependencies**: TASK-1.1.
-
----
-
-### TASK-1.3: Staff Enquiry Management & Repeat Lead Identification
-- **Exact Implementation Objective**: Implement internal enquiry management, manual lead logging (WhatsApp/phone), and repeat enquiry tagging.
-- **Files Expected to be Created**:
-  - `backend/src/modules/enquiries/enquiry.routes.js`
-  - `frontend/src/pages/staff/customers/EnquiryListPage.jsx` (`S-13`)
-  - `frontend/src/pages/staff/customers/EnquiryDetailPage.jsx` (`S-14`)
-- **Files Allowed to be Modified**: `backend/src/modules/enquiries/enquiry.controller.js`, `enquiry.service.js`.
-- **Database Changes**: Column `enquiries.repeat_of_id`.
-- **API Changes**: `GET /enquiries`, `POST /enquiries`, `GET /enquiries/:id`, `PATCH /enquiries/:id`, `POST /enquiries/:id/status`.
-- **Frontend Screens**: Enquiry List (`S-13`), Enquiry Detail (`S-14`).
-- **Business Rules**: Lead from existing customer within 30 days tagged `Repeat` and linked. Status changes: `New → Contacted → Survey Scheduled → ...`. Moving to `Lost` requires mandatory reason.
-- **Required Validations**: Channel ∈ Website/Phone/WhatsApp; reason mandatory for Lost/Hold.
-- **Required Error States**: 422 `REASON_REQUIRED`.
-- **Authorization Requirements**: Sales, Admin.
-- **Audit Requirements**: Status transitions and assignments recorded in `status_history`.
-- **Test Cases**: `T-ENQ-02` (enquiry within 30 days tagged repeat), `T-ENQ-03` (lost status rejected without reason).
-- **Definition of Done**: Staff can log phone/WhatsApp leads, assign enquiries, view repeat lead banners, and advance lead statuses.
-- **Dependencies**: TASK-1.2.
+### Task 8.3: Customer On-Screen Handover Digital Signature & Sign-Off
+- **Objective:** Homeowner inspects installation, confirms system size and operating status, and signs directly on technician's touch device to accept the work.
+- **Files Created:** `frontend/src/features/operations/HandoverSignatureModal.jsx`.
+- **Files Modified:** `backend/src/modules/operations/installation.controller.js`, `backend/src/modules/operations/installation.service.js`.
+- **Database Changes:** Tables created: `installation_handover`, `digital_signatures`; updates `installation_jobs.status = 'COMPLETED'`.
+- **API Changes:** `POST /api/operations/installations/:id/sign-handover`, `GET /api/operations/installations/:id/handover-certificate`.
+- **Frontend Screens:** Customer Handover Screen: Confirmation of working generation, HTML5 touch signature pad, Clear & Sign buttons, Certificate viewer.
+- **Business Rules:** CRITICAL BUSINESS GATE:
+  1. Job cannot be signed without passed generation test and 4 mandatory photos.
+  2. Signature data URL stored with timestamp and customer name.
+  3. Signing completes installation job and generates Handover Certificate.
+- **Validations:** Signature canvas must contain drawn vector strokes (non-empty data URL).
+- **Error States:** 400 Bad Request if signature is blank or prerequisite tests are incomplete.
+- **Authorization:** Customer (assisted by Field Technician).
+- **Audit Req:** Digital signature hash, customer name, date/time, IP/GPS logged in `audit_logs`.
+- **Test Cases:** TC-SIG-001 (Customer signs on screen; handover certificate generated; job marked COMPLETED).
+- **Definition of Done:** Homeowner signs on screen; installation marked completed; signed certificate PDF available for download.
+- **Dependencies:** Task 8.2.
 
 ---
 
-### TASK-1.4: Site Survey Scheduling & Conflict Detection
-- **Exact Implementation Objective**: Build site survey booking calendar with surveyor availability and conflict validation.
-- **Files Expected to be Created**:
-  - `backend/src/migrations/021_surveys.sql`
-  - `backend/src/modules/surveys/survey.routes.js`, `survey.controller.js`, `survey.service.js`
-  - `frontend/src/pages/staff/surveys/SurveyListPage.jsx` (`S-20`)
-  - `frontend/src/pages/staff/surveys/SurveySchedulePage.jsx` (`S-21`)
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Table `surveys` (survey_code, enquiry_id, assigned_to, scheduled_at, status, revision_no).
-- **API Changes**: `POST /surveys`, `GET /surveys`, `POST /surveys/:id/reschedule`.
-- **Frontend Screens**: Survey List (`S-20`), Schedule Calendar (`S-21`).
-- **Business Rules**: Customer address required before scheduling. Checks surveyor availability; blocks double booking with 409 Conflict. Moves enquiry to `Survey Scheduled`.
-- **Required Validations**: Future timestamp; valid surveyor user ID.
-- **Required Error States**: 409 `SURVEYOR_SCHEDULE_CONFLICT`, 422 `ADDRESS_REQUIRED`.
-- **Authorization Requirements**: Sales, Admin.
-- **Audit Requirements**: Scheduling and assignments audited.
-- **Test Cases**: `T-SRV-01` (survey scheduled), `T-SRV-02` (overlapping schedule rejected 409).
-- **Definition of Done**: Staff can schedule surveys without double-booking; enquiry status advances.
-- **Dependencies**: TASK-1.3.
+## Phase 9: Serialized Warranty Activation Engine
+**Lead:** Member 3 (Warranty Core) + Member 4 (Service Link)  
+**Dependencies:** Phase 6, Phase 8
+
+### Task 9.1: Automated Serialized Warranty Activation
+- **Objective:** Automatically activate warranty records for every serial number installed on the project upon completion sign-off without manual register typing.
+- **Files Created:** `frontend/src/features/operations/WarrantyRegistryPage.jsx`, `backend/src/modules/operations/warranty.controller.js`, `backend/src/modules/operations/warranty.service.js`.
+- **Files Modified:** `backend/src/modules/operations/operations.routes.js`.
+- **Database Changes:** Inserts into `warranty_records`; updates `serial_registry.status = 'ACTIVE_WARRANTY'`.
+- **API Changes:** `POST /api/operations/warranty/activate-project-serials`, `GET /api/operations/warranty/records`, `GET /api/operations/warranty/:serialNumber`.
+- **Frontend Screens:** Warranty Registry Page with warranty cards, active days remaining, expiration alerts, and PDF warranty certificates.
+- **Business Rules:** CRITICAL BUSINESS GATE:
+  - Solar Panels: 20-Year (240 months) performance warranty.
+  - Inverter: 2-Year (24 months) manufacturer replacement warranty [Configurable].
+  - Battery: 2-Year (24 months) cycle warranty [Configurable].
+  - Clock starts automatically on completion/delivery date.
+  - Manual typing of dates is forbidden.
+- **Validations:** Start date = job handover date; expiration date calculated exactly by calendar arithmetic.
+- **Error States:** 409 Conflict if warranty already active; 400 if serial not attached to project.
+- **Authorization:** System automated / Operations Lead.
+- **Audit Req:** Warranty activation event logged with all serial IDs and computed expiration timestamps.
+- **Test Cases:** TC-WRN-001 (Job handover automatically creates 20-year panel and 2-year inverter warranties), TC-WRN-002 (Warranty status query returns ACTIVE).
+- **Definition of Done:** All installed serial numbers have active warranty records with precise end dates.
+- **Dependencies:** Task 8.3, Task 6.3.
 
 ---
 
-### TASK-1.5: Mobile Survey Capture & Field Submission
-- **Exact Implementation Objective**: Create mobile-first survey entry form with physical parameter validation and photo upload.
-- **Files Expected to be Created**:
-  - `frontend/src/pages/staff/surveys/SurveyFormPage.jsx` (`S-22`)
-- **Files Allowed to be Modified**: `backend/src/modules/surveys/survey.controller.js`, `survey.service.js`.
-- **Database Changes**: CHECK constraint `(shadow_free_area_sqm <= roof_area_sqm)`. Table `files` linked.
-- **API Changes**: `PATCH /surveys/:id`, `POST /surveys/:id/photos/sign`, `POST /surveys/:id/submit`.
-- **Frontend Screens**: Mobile Survey Form (`S-22`).
-- **Business Rules**: Surveyor can save partial drafts. Final submission blocked unless all technical parameters populated, shadow-free area ≤ roof area, and required photos uploaded. Submission advances survey to `Submitted` and enquiry to `Survey Under Review`.
-- **Required Validations**: Roof area > 0; tilt 0–90°; shadow-free area ≤ roof area; cable distance ≥ 0; min 4 photos.
-- **Required Error States**: 422 `SURVEY_INCOMPLETE` with missing fields list.
-- **Authorization Requirements**: Assigned Surveyor, Admin.
-- **Audit Requirements**: Survey submissions and photo additions audited.
-- **Test Cases**: `T-SRV-04` (shadow-free > roof area fails), `T-SRV-05` (submit fails when photos missing).
-- **Definition of Done**: Field surveyor fills mobile form, uploads photos, and submits findings with full physics validation.
-- **Dependencies**: TASK-0.6, TASK-1.4.
+## Phase 10: Razorpay TEST MODE Payments & Webhook Idempotency
+**Lead:** Member 4  
+**Dependencies:** Phase 1, Phase 4
+
+### Task 10.1: Database Migration for Support, Finance & AI Subsystem
+- **Objective:** Deploy migration `004_support_finance_ai.sql` defining payments, webhooks, invoices, expenses, timesheets, subsidies, tickets, and AI logs.
+- **Files Created:** `backend/src/migrations/004_support_finance_ai.sql`.
+- **Files Modified:** None.
+- **Database Changes:** Tables created: `payments`, `payment_transactions`, `payment_webhooks`, `invoices`, `invoice_lines`, `project_expenses`, `technician_timesheets`, `subsidy_applications`, `support_tickets`, `ticket_messages`, `ai_audit_logs`.
+- **API Changes:** None.
+- **Frontend Screens:** None.
+- **Business Rules:** Financial ledger constraints; balance checks; unique payment IDs.
+- **Validations:** Foreign keys to `projects`, `users`, `customers`.
+- **Error States:** Migration errors trapped.
+- **Authorization:** Member 4 ownership.
+- **Audit Req:** Migration recorded.
+- **Test Cases:** TC-DB-005 (Execute 004_support_finance_ai.sql cleanly).
+- **Definition of Done:** All finance, support, and AI tables exist in PostgreSQL.
+- **Dependencies:** Task 1.2.
+
+### Task 10.2: Razorpay TEST MODE Order Creation & Frontend Checkout
+- **Objective:** Integrate Razorpay SDK in TEST MODE to generate payment orders for advance payments and final balance settlements.
+- **Files Created:** `frontend/src/features/finance_support_ai/RazorpayCheckoutModal.jsx`, `backend/src/modules/finance_support_ai/payment.controller.js`, `backend/src/modules/finance_support_ai/payment.service.js`, `backend/src/config/razorpay.js`.
+- **Files Modified:** `backend/src/app.js`.
+- **Database Changes:** Inserts into `payments`, `payment_transactions`.
+- **API Changes:** `POST /api/finance/payments/razorpay/create-order`, `POST /api/finance/payments/razorpay/verify`.
+- **Frontend Screens:** Payment Modal embedding Razorpay standard test checkout with mock card/UPI options.
+- **Business Rules:** CRITICAL BUSINESS GATE:
+  - Advance payment (e.g. 25% or full amount) unlocks warehouse packing and installation crew dispatch.
+  - Backend MUST cryptographically verify Razorpay HMAC SHA256 signature using test secret before acknowledging payment.
+- **Validations:** Amount in paise > 0; currency = 'INR'; receipt string = project ID.
+- **Error States:** 400 Bad Request on invalid signature; 422 Payment failed from gateway.
+- **Authorization:** Customer, Sales, Finance.
+- **Audit Req:** Payment order creation, raw gateway response, and verification result logged in `audit_logs`.
+- **Test Cases:** TC-PAY-001 (Create test order and verify valid HMAC signature), TC-PAY-002 (Tampered signature rejected with 400).
+- **Definition of Done:** Customer pays in Razorpay Test Mode; backend verifies signature; order advances to 'ADVANCE_PAID'.
+- **Dependencies:** Task 10.1, Task 4.1.
+
+### Task 10.3: Idempotent Razorpay Webhook Processing Engine
+- **Objective:** Build a resilient, idempotent webhook consumer that processes `payment.captured` and `payment.failed` events without creating duplicate financial records.
+- **Files Created:** `backend/src/modules/finance_support_ai/webhook.controller.js`.
+- **Files Modified:** `backend/src/modules/finance_support_ai/payment.service.js`.
+- **Database Changes:** Inserts into `payment_webhooks` with unique index on `event_id`.
+- **API Changes:** `POST /api/finance/payments/razorpay/webhook`.
+- **Frontend Screens:** Webhook monitoring table in Finance Dashboard.
+- **Business Rules:** CRITICAL BUSINESS GATE:
+  - Replayed or duplicate webhooks MUST NOT credit customer balance or create duplicate ledger entries.
+  - System checks `event_id` in `payment_webhooks`; if exists, returns 200 OK immediately without re-processing.
+- **Validations:** Webhook signature verification via `crypto.createHmac('sha256', secret)`.
+- **Error States:** 400 Bad Request on invalid webhook signature.
+- **Authorization:** Public webhook endpoint secured by signature secret.
+- **Audit Req:** Every incoming webhook stored with processing outcome.
+- **Test Cases:** TC-PAY-003 (Process new payment webhook credits project), TC-PAY-004 (Duplicate webhook processed idempotently with zero double-credit).
+- **Definition of Done:** Webhooks handle network retries cleanly without ledger distortion.
+- **Dependencies:** Task 10.2.
 
 ---
 
-### TASK-1.6: Survey Approval, Rejection & Revision Tracking
-- **Exact Implementation Objective**: Implement administrative survey approval queue with mandatory rejection reasons and revision history.
-- **Files Expected to be Created**:
-  - `backend/src/modules/surveys/survey-review.service.js`
-  - `frontend/src/pages/staff/surveys/SurveyApprovalPage.jsx` (`S-23`)
-- **Files Allowed to be Modified**: `backend/src/modules/surveys/survey.routes.js`, `survey.controller.js`.
-- **Database Changes**: Tables `survey_reviews`, `survey_revisions`.
-- **API Changes**: `POST /surveys/:id/approve`, `POST /surveys/:id/reject`, `POST /surveys/:id/resubmit`.
-- **Frontend Screens**: Survey Approval Queue (`S-23`).
-- **Business Rules**: Rejection requires reason code and comment (≥ 10 chars), moving survey to `Rejected` / `Rework Required`. Resubmission creates revision snapshot (`revision_no + 1`) and returns to `Submitted`. Approval locks survey (`Approved`) and advances enquiry to `Survey Approved`. Approved survey is prerequisite for quotation.
-- **Required Validations**: Rejection comment min 10 chars.
-- **Required Error States**: 422 `REJECTION_REASON_REQUIRED`.
-- **Authorization Requirements**: Admin: Approve/Reject; Surveyor: Resubmit.
-- **Audit Requirements**: Approvals, rejections, and rework revisions audited.
-- **Test Cases**: `T-05` (reject without reason blocked), `T-06` (rejection → rework → resubmit → approve cycle).
-- **Definition of Done**: Admin reviews findings and approves/rejects; rework updates revision number; approved survey unlocks quote generation.
-- **Dependencies**: TASK-1.5.
+## Phase 11: Invoicing, Job Expenses & Technician Payroll
+**Lead:** Member 4  
+**Dependencies:** Phase 8, Phase 10
+
+### Task 11.1: Automated GST Tax Invoicing & Balance Settlement
+- **Objective:** Generate formal GST Tax Invoices detailing hardware BOM, labor charges, GST breakdown, advance deduction, and outstanding balance.
+- **Files Created:** `frontend/src/features/finance_support_ai/InvoicesPage.jsx`, `backend/src/modules/finance_support_ai/invoice.controller.js`, `backend/src/modules/finance_support_ai/invoice.service.js`.
+- **Files Modified:** `backend/src/modules/finance_support_ai/financeSupport.routes.js`.
+- **Database Changes:** Inserts into `invoices`, `invoice_lines`.
+- **API Changes:** `POST /api/finance/invoices/generate`, `GET /api/finance/invoices/:id`, `GET /api/finance/invoices/:id/pdf`.
+- **Frontend Screens:** Invoices Management Page with Tax Invoice viewer and PDF download.
+- **Business Rules:** Invoice balance = Grand Total - Advance Payments. HSN/SAC codes included for solar equipment and installation services.
+- **Validations:** Balance cannot be negative; invoice items must match actual installed equipment.
+- **Error States:** 400 Bad Request on duplicate invoice generation for same milestone.
+- **Authorization:** Finance, Director.
+- **Audit Req:** Invoice generation, dispatch, and payments credited logged in `audit_logs`.
+- **Test Cases:** TC-INV-005 (Generate tax invoice deducting advance payment), TC-INV-006 (Verify GST calculation).
+- **Definition of Done:** Accurate GST tax invoice PDF generated and accessible to customer and finance team.
+- **Dependencies:** Task 10.2, Task 8.3.
+
+### Task 11.2: Project Expense Logging & Receipt Management
+- **Objective:** Allow operations and field crew to record project-specific incidental expenses (local transport, extra wiring conduit, permits, food) with receipt photos.
+- **Files Created:** `frontend/src/features/finance_support_ai/ProjectExpensesPage.jsx`, `backend/src/modules/finance_support_ai/expense.service.js`.
+- **Files Modified:** `backend/src/modules/finance_support_ai/financeSupport.routes.js`.
+- **Database Changes:** Inserts into `project_expenses`.
+- **API Changes:** `POST /api/finance/projects/:id/expenses`, `GET /api/finance/projects/:id/expenses`.
+- **Frontend Screens:** Expense Entry Screen with category picker, amount, notes, and receipt photo upload.
+- **Business Rules:** Incidental expenses tagged to specific Project ID; amounts over ₹500 require receipt photo upload.
+- **Validations:** Amount > 0; category must be in `['TRANSPORT', 'PERMITS', 'EXTRA_HARDWARE', 'MEALS', 'OTHER']`.
+- **Error States:** 400 Bad Request if receipt missing for large amount.
+- **Authorization:** Operations Lead, Finance, Director.
+- **Audit Req:** Expense logged with user ID and approval status.
+- **Test Cases:** TC-EXP-001 (Log expense with receipt), TC-EXP-002 (Reject expense over ₹500 without receipt).
+- **Definition of Done:** Project expenses recorded and automatically factored into net job margin.
+- **Dependencies:** Task 1.6, Task 4.1.
+
+### Task 11.3: Technician Timesheet Tracking & Payout Calculation
+- **Objective:** Aggregate verified installation job hours for the 15-technician crew and compute weekly/monthly payroll amounts.
+- **Files Created:** `frontend/src/features/finance_support_ai/TechnicianPayrollPage.jsx`, `backend/src/modules/finance_support_ai/timesheet.controller.js`, `backend/src/modules/finance_support_ai/timesheet.service.js`.
+- **Files Modified:** `backend/src/modules/finance_support_ai/financeSupport.routes.js`.
+- **Database Changes:** Inserts into `technician_timesheets`, `technician_payouts`.
+- **API Changes:** `POST /api/finance/timesheets/log`, `GET /api/finance/timesheets/summary`, `POST /api/finance/timesheets/approve-payout`.
+- **Frontend Screens:** Technician Timesheet Review Board with total hours, hourly rate / per-kW multiplier, and Director sign-off button.
+- **Business Rules:** On-site hours pulled from verified mobile job start and completion timestamps. Prevents manual tampering beyond authorized manager override.
+- **Validations:** Hours per day <= 16; hourly rate > 0.
+- **Error States:** 400 Bad Request on excessive hours without justification.
+- **Authorization:** Operations Lead, Director.
+- **Audit Req:** Timesheet approvals and payout runs logged in `audit_logs`.
+- **Test Cases:** TC-PAY-005 (Aggregate technician hours across jobs), TC-PAY-006 (Director approves weekly payout run).
+- **Definition of Done:** Director reviews and approves technician payroll based on verified field hours.
+- **Dependencies:** Task 7.2.
 
 ---
 
-### TASK-1.7: Solar Packages & Compatibility Rule Engine
-- **Exact Implementation Objective**: Build configuration for solar packages (1–5 kW, On/Off-Grid) and technical compatibility validation rules.
-- **Files Expected to be Created**:
-  - `backend/src/migrations/022_packages.sql`
-  - `backend/src/modules/packages/package.routes.js`, `package.controller.js`, `package.service.js`
-  - `backend/src/modules/packages/compatibility.engine.js`
-  - `frontend/src/pages/staff/settings/PackageSettingsPage.jsx` (`S-100`)
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Tables `solar_packages`, `package_bom_items`, `package_compat_rules`.
-- **API Changes**: `GET /packages`, `POST /packages`, `PATCH /packages/:id`.
-- **Frontend Screens**: Package Settings (`S-100`).
-- **Business Rules**: On-Grid systems cannot have battery lines. Off-Grid systems MUST have battery and charge controller/hybrid inverter. Inverter capacity must cover system capacity.
-- **Required Validations**: Package capacity range 1–5 kW.
-- **Required Error States**: 422 `COMPATIBILITY_RULE_VIOLATION`.
-- **Authorization Requirements**: Admin: Manage; Sales: Read.
-- **Audit Requirements**: Package and rule modifications audited.
-- **Test Cases**: `T-08` (off-grid without battery blocked by compatibility rule).
-- **Definition of Done**: Packages configured with templates; compatibility engine evaluates equipment pairings accurately.
-- **Dependencies**: TASK-0.7.
+## Phase 12: Government Subsidy Documentation Tracking
+**Lead:** Member 4  
+**Dependencies:** Phase 4, Phase 8
+
+### Task 12.1: Government Subsidy Application & Paperwork Tracker
+- **Objective:** Track the multi-step government rooftop solar subsidy workflow (e.g. PM Surya Ghar portal submission, DISCOM inspection, bi-directional net meter installation, subsidy credit).
+- **Files Created:** `frontend/src/features/finance_support_ai/SubsidyTrackerPage.jsx`, `backend/src/modules/finance_support_ai/subsidy.controller.js`, `backend/src/modules/finance_support_ai/subsidy.service.js`.
+- **Files Modified:** `backend/src/modules/finance_support_ai/financeSupport.routes.js`.
+- **Database Changes:** Tables created: `subsidy_applications`, `subsidy_milestones`.
+- **API Changes:** `POST /api/finance/projects/:id/subsidy`, `PUT /api/finance/projects/:id/subsidy/milestone`, `GET /api/finance/subsidies`.
+- **Frontend Screens:** Subsidy Pipeline Board (Kanban style: Application Submitted -> DISCOM Inspection -> Net Meter Installed -> Subsidy Credited).
+- **Business Rules:** Tracks consumer electricity number, national portal registration number, and milestone inspection dates.
+- **Validations:** Application number format; milestone progression sequential.
+- **Error States:** 400 Bad Request on skipping sequential subsidy stages.
+- **Authorization:** Sales, Finance, Director.
+- **Audit Req:** Subsidy milestone updates and DISCOM approval dates logged.
+- **Test Cases:** TC-SUB-001 (Initialize subsidy application), TC-SUB-002 (Advance subsidy through net metering to disbursement).
+- **Definition of Done:** Complete subsidy documentation and inspection status tracked per project.
+- **Dependencies:** Task 4.1.
 
 ---
 
-### TASK-1.8: Survey-Gated Quotation & Automatic BOM Generation
-- **Exact Implementation Objective**: Implement quotation creation strictly gated by an approved survey, with automatic BOM line calculation.
-- **Files Expected to be Created**:
-  - `backend/src/migrations/023_quotations.sql`
-  - `backend/src/modules/quotations/quotation.routes.js`, `quotation.controller.js`, `quotation.service.js`
-  - `backend/src/modules/quotations/bom.engine.js`
-  - `frontend/src/pages/staff/quotations/QuotationListPage.jsx` (`S-30`)
-  - `frontend/src/pages/staff/quotations/QuotationCreatePage.jsx` (`S-31`)
-  - `frontend/src/pages/staff/quotations/BOMReviewPage.jsx` (`S-32`)
-  - `frontend/src/pages/staff/quotations/QuotationDetailPage.jsx` (`S-33`)
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Tables `quotations`, `quotation_items`, `price_list_items`. Unique index `(enquiry_id, version)`.
-- **API Changes**: `POST /quotations`, `GET /quotations/:id`, `PATCH /quotations/:id`, `POST /quotations/:id/bom/regenerate`, `PATCH /quotations/:id/items/:itemId`, `POST /quotations/:id/issue`.
-- **Frontend Screens**: Quotation List (`S-30`), Create (`S-31`), BOM Review (`S-32`), Detail (`S-33`).
-- **Business Rules**: **CRITICAL**: Creation strictly rejected unless survey is `Approved`. BOM generated via quantity rules (`CEIL_DIV_KW`, `PER_KW`, `FIXED`). Line adjustments record template variance. Issuance locks quotation and advances enquiry to `Quotation Issued`.
-- **Required Validations**: Survey must be Approved; positive item quantities; discount > threshold requires Admin.
-- **Required Error States**: 422 `SURVEY_NOT_APPROVED`, 422 `COMPATIBILITY_VIOLATION`.
-- **Authorization Requirements**: Sales, Admin.
-- **Audit Requirements**: Quotation issuance and manual BOM overrides audited.
-- **Test Cases**: `T-07` / `AC-1` (quotation creation before survey approval returns 422 `SURVEY_NOT_APPROVED`), `T-BOM-01` (3 kW system generates 6 panels via CEIL_DIV_KW).
-- **Definition of Done**: Quotation cannot be created without approved survey; BOM calculates automatically from package; line pricing itemized.
-- **Dependencies**: TASK-1.6, TASK-1.7.
+## Phase 13: Support Ticketing & Warranty-Based Billing Contracts
+**Lead:** Member 4  
+**Dependencies:** Phase 9
+
+### Task 13.1: Support Helpdesk & Service Ticket Lifecycle
+- **Objective:** Manage post-installation customer complaints and breakdown calls with automated customer project lookup.
+- **Files Created:** `frontend/src/features/finance_support_ai/SupportHelpdeskPage.jsx`, `frontend/src/features/finance_support_ai/TicketDetailPage.jsx`, `backend/src/modules/finance_support_ai/ticket.controller.js`, `backend/src/modules/finance_support_ai/ticket.service.js`.
+- **Files Modified:** `backend/src/modules/finance_support_ai/financeSupport.routes.js`.
+- **Database Changes:** Tables created: `support_tickets`, `ticket_messages`, `ticket_feedback`.
+- **API Changes:** `POST /api/support/tickets`, `GET /api/support/tickets`, `GET /api/support/tickets/:id`, `PUT /api/support/tickets/:id/status`.
+- **Frontend Screens:** Support Helpdesk Kanban/Table (Open, Assigned, In_Progress, Pending_Customer, Closed) with customer quick-search by phone.
+- **Business Rules:** Entering customer phone number immediately links active project, installed inverter/battery models, and serial numbers.
+- **Validations:** Category mandatory ('ZERO_POWER', 'INVERTER_FAULT', 'PHYSICAL_DAMAGE', 'BILLING', 'OTHER'); description >= 10 chars.
+- **Error States:** 404 Customer/Project not found.
+- **Authorization:** Support Agent, Director, Customer.
+- **Audit Req:** Ticket creation, assignment, and status transitions logged in `audit_logs`.
+- **Test Cases:** TC-TCK-001 (Create support ticket attaches customer serials), TC-TCK-002 (Assign ticket to field technician).
+- **Definition of Done:** Support tickets created and linked to authoritative customer serial records within seconds.
+- **Dependencies:** Task 9.1, Task 2.4.
+
+### Task 13.2: Automated Warranty Eligibility & Repair Billing Contract
+- **Objective:** Check serial number warranty status during support ticket processing and automatically bill parts/labor if expired.
+- **Files Created:** `backend/src/modules/finance_support_ai/warrantyContract.service.js`.
+- **Files Modified:** `frontend/src/features/finance_support_ai/TicketDetailPage.jsx`, `backend/src/modules/finance_support_ai/ticket.service.js`.
+- **Database Changes:** Inserts into `service_estimates`; updates `support_tickets.warranty_status`.
+- **API Changes:** `POST /api/support/tickets/:id/verify-warranty`, `POST /api/support/tickets/:id/generate-repair-quote`.
+- **Frontend Screens:** Prominent Warranty Status Badge on Ticket Detail (Green: 'UNDER_WARRANTY', Red: 'WARRANTY_EXPIRED') with cost breakdown.
+- **Business Rules:** CRITICAL BUSINESS GATE:
+  1. If unit is UNDER WARRANTY: Repair/replacement labor and parts cost = ₹0.
+  2. If unit is WARRANTY EXPIRED: System automatically calculates standard replacement parts and technician visit charge.
+  3. No manual fee waiver without explicit Director role authorization.
+- **Validations:** Ticket incident date checked against warranty expiration date.
+- **Error States:** 400 Bad Request if serial number is missing on ticket.
+- **Authorization:** Support Agent, Director.
+- **Audit Req:** Warranty check result, eligibility decision, and repair quote logged in `audit_logs`.
+- **Test Cases:** TC-WRN-003 (Inverter at 18 months bills ₹0 under 2-year warranty), TC-WRN-004 (Inverter at 26 months automatically bills parts + labor).
+- **Definition of Done:** System automatically determines warranty coverage and generates ₹0 or billable repair quote.
+- **Dependencies:** Task 13.1, Task 9.1.
+
+### Task 13.3: Customer Resolution Confirmation Gate
+- **Objective:** Enforce that service tickets cannot be closed unilaterally by an agent until the customer confirms resolution.
+- **Files Created:** `frontend/src/features/finance_support_ai/CustomerTicketConfirmModal.jsx`.
+- **Files Modified:** `backend/src/modules/finance_support_ai/ticket.controller.js`, `backend/src/modules/finance_support_ai/ticket.service.js`.
+- **Database Changes:** Updates `support_tickets.status = 'CLOSED'`, `support_tickets.customer_confirmed_at`.
+- **API Changes:** `POST /api/support/tickets/:id/customer-confirm`.
+- **Frontend Screens:** Customer Confirmation Dialog (Confirm Working / Still Having Issue) with star rating feedback.
+- **Business Rules:** CRITICAL BUSINESS GATE: Status 'Resolved' requires customer confirmation to advance to 'Closed'. Tickets cannot be closed unilaterally by support staff.
+- **Validations:** Customer must select 'CONFIRMED_WORKING' or 'UNRESOLVED'.
+- **Error States:** 403 Forbidden if agent attempts to mark 'Closed' without customer confirmation.
+- **Authorization:** Customer, Support Agent (assisted with customer authorization reference).
+- **Audit Req:** Customer confirmation timestamp and feedback logged.
+- **Test Cases:** TC-TCK-003 (Customer confirmation closes ticket), TC-TCK-004 (Agent unilateral close attempt blocked).
+- **Definition of Done:** Tickets require customer sign-off to close, ensuring real customer satisfaction.
+- **Dependencies:** Task 13.2.
 
 ---
 
-### TASK-1.9: Customer Quotation Acceptance & Order/Project Spawning
-- **Exact Implementation Objective**: Enable customer quotation review/acceptance on portal and execute atomic creation of Order, Project, and frozen BOM snapshot.
-- **Files Expected to be Created**:
-  - `frontend/src/pages/portal/PortalQuotationPage.jsx` (`P-12`)
-- **Files Allowed to be Modified**: `backend/src/modules/quotations/quotation.controller.js`, `quotation.service.js`.
-- **Database Changes**: Creates records in `orders`, `projects`, and `project_bom_items` via cross-module contract.
-- **API Changes**: `POST /quotations/:id/accept`, `POST /quotations/:id/decline`.
-- **Frontend Screens**: Customer Portal Quotation View (`P-12`), Staff Quotation Detail (`S-33`).
-- **Business Rules**: Customer (or Sales with evidence) accepts quotation. Single database transaction:
-  1. Sets quotation to `Accepted`.
-  2. Creates `orders` (`status = 'Created'`, `payment_status = 'Unpaid'`).
-  3. Creates `projects` (`status = 'Created'`).
-  4. Freezes snapshot of BOM lines into `project_bom_items`.
-  5. Advances enquiry to `Converted to Order`.
-  Accepted quotations are immutable. Decline requires reason.
-- **Required Validations**: Quotation must not be expired.
-- **Required Error States**: 409 `ALREADY_ACCEPTED`, 422 `QUOTATION_EXPIRED`.
-- **Authorization Requirements**: Customer (own), Sales/Admin (with evidence).
-- **Audit Requirements**: Quotation acceptance method, actor, and resulting Order/Project audited.
-- **Test Cases**: `T-04` (happy path acceptance spawns order and project), `T-QUO-02` (expired quote acceptance fails).
-- **Definition of Done**: Customer clicks Accept on portal; order and project records created atomically with frozen BOM snapshot.
-- **Dependencies**: TASK-1.8.
+## Phase 14: AI Support Copilot, Fault Grounding & Readiness Auditor
+**Lead:** Member 4  
+**Dependencies:** Phase 13
+
+### Task 14.1: Mock AI Provider Adapter & Architecture Guardrails
+- **Objective:** Establish the AI service layer with a deterministic Mock Provider (default for tests/demo) and configurable LLM adapters (OpenAI/Anthropic), enforcing strict guardrails against consequential actions.
+- **Files Created:** `backend/src/modules/finance_support_ai/aiCopilot.service.js`, `backend/src/modules/finance_support_ai/ai.controller.js`, `backend/src/modules/finance_support_ai/aiGuardrails.middleware.js`.
+- **Files Modified:** `backend/src/modules/finance_support_ai/financeSupport.routes.js`.
+- **Database Changes:** Inserts into `ai_audit_logs`.
+- **API Changes:** `POST /api/ai/triage-ticket`, `POST /api/ai/explain-fault`.
+- **Frontend Screens:** AI Copilot sidebar panel on Ticket Detail page with "AI Suggestion - Requires Human Verification" badge.
+- **Business Rules:** CRITICAL GUARDRAIL: AI CANNOT alter database records, cannot issue refunds, cannot close tickets, and cannot alter warranties. AI provides grounded explanations and suggestions only.
+- **Validations:** Input prompt sanitized; PII masked.
+- **Error States:** 403 Forbidden if AI service attempts a mutating database operation.
+- **Authorization:** Support Agent, Director.
+- **Audit Req:** Every AI interaction logged: prompt, model, input context, source grounding, output, agent review action.
+- **Test Cases:** TC-AI-001 (AI explains inverter fault code with grounded manual source), TC-AI-002 (AI blocked from executing refund).
+- **Definition of Done:** AI copilot explains fault codes based on manufacturer knowledge base without executing consequential actions.
+- **Dependencies:** Task 10.1, Task 13.1.
+
+### Task 14.2: AI Readiness & Missing-Information Audit Engine
+- **Objective:** Provide automated pre-submission readiness checks on site surveys and installation job cards, flagging missing photos, unfeasible specs, or shadow risks.
+- **Files Created:** `frontend/src/features/finance_support_ai/AIReadinessBadge.jsx`.
+- **Files Modified:** `backend/src/modules/finance_support_ai/aiCopilot.service.js`, `backend/src/modules/finance_support_ai/ai.controller.js`.
+- **Database Changes:** Inserts into `ai_audit_logs`.
+- **API Changes:** `POST /api/ai/audit-readiness`.
+- **Frontend Screens:** AI Readiness Banner on Survey Review and Installation pages (e.g. "Ready for Review" vs "Missing 1 roof angle photo, high cable resistance risk").
+- **Business Rules:** AI provides advisory audit score (0-100%); flags missing inputs or anomalous readings for human reviewers.
+- **Validations:** Payload format validation.
+- **Error States:** 200 with fallback advisory if AI model is unreachable.
+- **Authorization:** Field Tech, Sales, Operations, Director.
+- **Audit Req:** Audit check logged with entity ID and warnings generated.
+- **Test Cases:** TC-AI-003 (Readiness checker flags missing photo), TC-AI-004 (Readiness checker confirms 100% complete survey).
+- **Definition of Done:** Technicians and managers receive instant AI feedback on missing documentation before submitting.
+- **Dependencies:** Task 14.1, Task 2.6, Task 8.2.
 
 ---
 
-## Phase 2: Operations and Fulfilment (Priority 2)
-*Owner: Member 3 | Prerequisite: Phase 1*
+## Phase 15: Unit Economics, Profitability & Role-Aware Dashboards
+**Lead:** Member 4  
+**Dependencies:** Phase 11, Phase 13
 
-### TASK-2.1: Product Catalog & Dual-State Stock Ledger
-- **Exact Implementation Objective**: Implement products catalog and transactional stock movement ledger (`on_hand`, `reserved`, `available`).
-- **Files Expected to be Created**:
-  - `backend/src/migrations/040_inventory.sql`
-  - `backend/src/modules/products/product.routes.js`, `product.controller.js`, `product.service.js`
-  - `backend/src/modules/inventory/stock.routes.js`, `stock.controller.js`, `stock.service.js`
-  - `frontend/src/pages/staff/inventory/InventoryOverviewPage.jsx` (`S-50`)
-  - `frontend/src/pages/staff/inventory/ProductDetailPage.jsx` (`S-51`)
-  - `frontend/src/api/operations.api.js`
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Tables `products`, `stock_levels`, `stock_movements`. CHECK constraint `(on_hand >= 0 AND reserved >= 0 AND reserved <= on_hand)`.
-- **API Changes**: `GET /products`, `POST /products`, `GET /stock`, `GET /stock/movements`.
-- **Frontend Screens**: Stock Overview (`S-50`), Product Detail & Movements (`S-51`).
-- **Business Rules**: Available = on_hand - reserved. Database CHECK constraint strictly prevents negative on_hand or reserved > on_hand. Every stock alteration records a row in `stock_movements`.
-- **Required Validations**: SKU unique; standard cost ≥ 0; positive movement quantities.
-- **Required Error States**: 409 `SKU_EXISTS`, 422 `INVALID_STOCK_OPERATION`.
-- **Authorization Requirements**: Warehouse, Admin: Full CRUD; Sales: Read availability.
-- **Audit Requirements**: Every stock movement audited with actor, quantity, and reason.
-- **Test Cases**: `T-STK-01` (stock movement updates on_hand and available), `T-STK-02` (reserving beyond on_hand throws DB check error).
-- **Definition of Done**: Product catalog operational; movements update ledger transactionally; DB constraint prevents negative stock.
-- **Dependencies**: TASK-0.4.
+### Task 15.1: Project Unit Economics & Profitability View
+- **Objective:** Compute authoritative net margin and profit/loss on every completed solar installation by aggregating invoiced revenue, actual BOM hardware cost, technician labor, and logged incidental expenses.
+- **Files Created:** `frontend/src/features/finance_support_ai/ProjectProfitabilityPage.jsx`, `backend/src/modules/finance_support_ai/profitability.service.js`.
+- **Files Modified:** `backend/src/modules/finance_support_ai/financeSupport.routes.js`.
+- **Database Changes:** Authoritative analytical view: `v_project_profitability`.
+- **API Changes:** `GET /api/finance/analytics/projects/:id/profitability`, `GET /api/finance/analytics/profitability-summary`.
+- **Frontend Screens:** Director Unit Economics Card: Contract Price, Invoiced Amount, BOM Hardware Cost, Labor Cost, Incidentals, Net Profit (₹), Net Margin (%).
+- **Business Rules:** CRITICAL ACCURACY RULE: Numbers MUST derive strictly from underlying DB records (invoices, inventory ledger, timesheets, expenses). No hardcoded mock values.
+- **Validations:** Hardware cost computed from actual scanned serials/BOM; revenue from settled invoices.
+- **Error States:** 403 Forbidden for non-Director roles.
+- **Authorization:** Director only.
+- **Audit Req:** Access to profitability analytics logged in `audit_logs`.
+- **Test Cases:** TC-PRF-001 (Calculate project net profit accurately), TC-PRF-002 (Non-director access blocked).
+- **Definition of Done:** Director views exact profit/loss breakdown across all 40 monthly installations with low-margin warnings.
+- **Dependencies:** Task 11.1, Task 11.2, Task 11.3, Task 6.3.
 
----
-
-### TASK-2.2: Goods Receipt & Serial Number Registration
-- **Exact Implementation Objective**: Ingest purchase receipts and register physical units into `serial_items`.
-- **Files Expected to be Created**:
-  - `backend/src/modules/inventory/receipt.service.js`
-  - `frontend/src/pages/staff/inventory/GoodsReceiptPage.jsx` (`S-52`)
-- **Files Allowed to be Modified**: `backend/src/modules/inventory/stock.routes.js`, `stock.controller.js`.
-- **Database Changes**: Table `serial_items`. Unique index `(product_id, serial_number)`.
-- **API Changes**: `POST /inventory/receipts`.
-- **Frontend Screens**: Goods Receipt Form (`S-52`).
-- **Business Rules**: For serialized products (Inverter, Battery, Panels), each unit gets a `serial_items` row with status `IN_STOCK`. Duplicate serial for same product strictly rejected by DB. Receipt increments `on_hand`.
-- **Required Validations**: Supplier invoice non-empty; unit cost > 0; unique serials.
-- **Required Error States**: 409 `SERIAL_ALREADY_EXISTS`.
-- **Authorization Requirements**: Warehouse, Admin.
-- **Audit Requirements**: Purchase receipts and serial ingestions audited.
-- **Test Cases**: `T-12` (duplicate serial entry rejected with specific error), `T-STK-03` (goods receipt increments stock).
-- **Definition of Done**: Warehouse staff can log receipts and scan/enter serial numbers; physical inventory registered in database.
-- **Dependencies**: TASK-2.1.
+### Task 15.2: 5 Role-Aware Real-Time Dashboards with Recharts
+- **Objective:** Implement dedicated, role-tailored dashboards for Director, Sales, Operations, Warehouse, and Support featuring interactive Recharts (monthly installations, revenue vs cost, pipeline, ticket resolution).
+- **Files Created:**
+  - `frontend/src/features/finance_support_ai/dashboards/DirectorDashboard.jsx`
+  - `frontend/src/features/finance_support_ai/dashboards/SalesDashboard.jsx`
+  - `frontend/src/features/finance_support_ai/dashboards/OperationsDashboard.jsx`
+  - `frontend/src/features/finance_support_ai/dashboards/WarehouseDashboard.jsx`
+  - `frontend/src/features/finance_support_ai/dashboards/SupportDashboard.jsx`
+  - `backend/src/modules/finance_support_ai/dashboard.controller.js`
+  - `backend/src/modules/finance_support_ai/dashboard.service.js`
+- **Files Modified:** `backend/src/modules/finance_support_ai/financeSupport.routes.js`, `frontend/src/App.jsx`.
+- **Database Changes:** Indexed views for dashboard KPI aggregates.
+- **API Changes:** `GET /api/finance/dashboards/:role`.
+- **Frontend Screens:** 5 Role-Specific Dashboards with KPI summary cards, Recharts bar/line/donut charts, and actionable task queues.
+- **Business Rules:** Each role sees only data relevant to their operational domain. Metrics must tie out 100% to authoritative records.
+- **Validations:** Role parameter must match authenticated user's assigned role.
+- **Error States:** 403 Forbidden on accessing unauthorized role dashboard.
+- **Authorization:** Role-restricted.
+- **Audit Req:** Dashboard loads recorded.
+- **Test Cases:** TC-DSH-001 (Director dashboard displays revenue, margins, open tickets), TC-DSH-002 (Technician/Ops dashboard displays active field jobs).
+- **Definition of Done:** All 5 user roles log into tailored dashboards powered by live authoritative PostgreSQL data and Recharts visualizations.
+- **Dependencies:** Task 15.1, Task 1.4.
 
 ---
 
-### TASK-2.3: Project Stock Reservation & Shortage Handling
-- **Exact Implementation Objective**: Implement payment-gated BOM material allocation and automated shortage flagging.
-- **Files Expected to be Created**:
-  - `backend/src/modules/inventory/allocation.service.js`
-  - `frontend/src/pages/staff/inventory/ProjectMaterialsPage.jsx` (`S-53`)
-- **Files Allowed to be Modified**: `backend/src/modules/inventory/stock.routes.js`, `stock.controller.js`.
-- **Database Changes**: Tables `project_bom_items`, `stock_reservations`.
-- **API Changes**: `POST /projects/:id/allocate`, `POST /projects/:id/reservations/release`.
-- **Frontend Screens**: Project BOM Readiness (`S-53`).
-- **Business Rules**: Allocation blocked unless order payment gate is met or policy exception approved. Reserves `min(required, available)`. Shortages flagged as `Short` with shortfall count; notifies Warehouse/Admin. Dispatch beyond reserved quantity blocked.
-- **Required Validations**: Project ID valid; order confirmed or exception exists.
-- **Required Error States**: 422 `PAYMENT_GATE_NOT_MET`, 422 `INSUFFICIENT_STOCK`.
-- **Authorization Requirements**: Warehouse, Admin.
-- **Audit Requirements**: Reservations and shortages audited.
-- **Test Cases**: `T-09` (dispatch blocked when stock insufficient), `T-RES-01` (shortage flagged when stock deficient).
-- **Definition of Done**: Project BOM allocates available stock when payment gate passes; shortages flagged clearly on UI.
-- **Dependencies**: TASK-1.9, TASK-2.1.
+## Phase 16: End-to-End System Integration, Staging & Hardening
+**Lead:** All Members (Led by Member 1)  
+**Dependencies:** Phases 1 through 15
 
----
+### Task 16.1: Cross-Module Integration Testing of 26-Stage Happy Path
+- **Objective:** Execute automated end-to-end integration test exercising all 26 stages from public lead submission to 20-year warranty activation and service ticketing.
+- **Files Created:** `backend/tests/integration/e2e_26_stage_workflow.test.js`.
+- **Files Modified:** None.
+- **Database Changes:** None.
+- **API Changes:** None.
+- **Frontend Screens:** Full UI manual walk-through verification.
+- **Business Rules:** Verify all 26 lifecycle stages complete with correct state transitions, serial scanning, payments, and warranty records.
+- **Validations:** Data integrity check at each stage handover.
+- **Error States:** Test fails if any transition gate permits unauthorized advancement.
+- **Authorization:** Automated test harness with simulated roles.
+- **Audit Req:** End-to-end test run results logged.
+- **Test Cases:** TC-E2E-001 (Full 26-Stage Lifecycle Happy Path).
+- **Definition of Done:** E2E test runs cleanly from start to finish with 100% pass rate.
+- **Dependencies:** All previous tasks.
 
-### TASK-2.4: Dispatch Workflow & Serial Scanning Verification
-- **Exact Implementation Objective**: Build dispatch note management and pre-dispatch barcode/serial number verification scanning.
-- **Files Expected to be Created**:
-  - `backend/src/migrations/041_dispatches.sql`
-  - `backend/src/modules/dispatches/dispatch.routes.js`, `dispatch.controller.js`, `dispatch.service.js`
-  - `frontend/src/pages/staff/inventory/DispatchListPage.jsx` (`S-54`)
-  - `frontend/src/pages/staff/inventory/SerialScanDispatchPage.jsx` (`S-55`)
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Tables `dispatches`, `dispatch_items`, `dispatch_serials`. Partial unique index `unique(serial_item_id) WHERE released_at IS NULL`.
-- **API Changes**: `POST /dispatches`, `POST /dispatches/:id/scan`, `DELETE /dispatches/:id/scan/:serial`, `POST /dispatches/:id/confirm`.
-- **Frontend Screens**: Dispatch List (`S-54`), Serial Scanning & Dispatch Screen (`S-55`).
-- **Business Rules**:
-  1. Serial scan validates: exists, product matches BOM line, status `IN_STOCK`/`RESERVED` for this project, not active elsewhere.
-  2. Database row lock on `serial_items` prevents concurrent duplicate scanning.
-  3. Dispatch confirmation blocked until scanned count equals required quantity for all serialized items.
-  4. Confirmation advances serials to `DISPATCHED`, writes movements, and creates warranty records in `Pending Activation`.
-- **Required Validations**: Scan counts must equal BOM line quantities.
-- **Required Error States**: 422 `SERIAL_UNKNOWN`, 422 `SERIAL_ALREADY_ASSIGNED`, 422 `SERIAL_WRONG_PRODUCT`, 422 `SCAN_COUNT_MISMATCH`.
-- **Authorization Requirements**: Warehouse. Admin: override.
-- **Audit Requirements**: Scans, unscans, and dispatch confirmations audited.
-- **Test Cases**: `T-10` (scan serial assigned to another project rejected), `T-11` (concurrent scan race condition handled by DB lock), `T-13` (confirmation blocked on count mismatch).
-- **Definition of Done**: Warehouse scans serials per BOM line; validation rejects mismatches; confirmation links serials and creates pending warranties.
-- **Dependencies**: TASK-2.2, TASK-2.3.
-
----
-
-### TASK-2.5: Site Delivery Confirmation & Warranty Activation Trigger
-- **Exact Implementation Objective**: Implement equipment arrival confirmation at installation site, triggering warranty timeline activation.
-- **Files Expected to be Created**:
-  - `backend/src/modules/dispatches/delivery.service.js`
-- **Files Allowed to be Modified**: `backend/src/modules/dispatches/dispatch.routes.js`, `dispatch.controller.js`.
-- **Database Changes**: Updates `dispatches.delivered_at` and `serial_items.status = 'DELIVERED'`.
-- **API Changes**: `POST /dispatches/:id/deliver`.
-- **Frontend Screens**: Dispatch Detail Delivery Confirmation button.
-- **Business Rules**: Sets `delivered_at`. Under default rule (`warranty_start_event = 'DELIVERY'` [SRC]), triggers `WarrantyService.activateForProject()`: moves records to `Active`, computes `end_date = delivered_at + duration_months`.
-- **Required Validations**: Dispatch must be in `Dispatched` status; timestamp <= current time.
-- **Required Error States**: 400 `INVALID_DISPATCH_STATUS`.
-- **Authorization Requirements**: Warehouse, Assigned Technician, Admin.
-- **Audit Requirements**: Delivery confirmation and warranty activations audited.
-- **Test Cases**: `T-17` (delivery confirmation sets start_date = delivered_at and activates warranty records).
-- **Definition of Done**: Delivery confirmed at site; equipment status updated; warranty records activated automatically.
-- **Dependencies**: TASK-2.4.
-
----
-
-### TASK-2.6: Warehouse Exceptions: Returns, Damage & Stock Corrections
-- **Exact Implementation Objective**: Implement site returns, damage quarantine, and administrative write-off workflow.
-- **Files Expected to be Created**:
-  - `backend/src/modules/inventory/exceptions.service.js`
-  - `frontend/src/pages/staff/inventory/InventoryExceptionsPage.jsx` (`S-56`)
-- **Files Allowed to be Modified**: `backend/src/modules/inventory/stock.routes.js`, `stock.controller.js`.
-- **Database Changes**: Table `stock_exceptions` (type, product_id, serial_item_id, qty, reason, photo_file_id, status, approved_by).
-- **API Changes**: `POST /stock-exceptions`, `POST /stock-exceptions/:id/approve`.
-- **Frontend Screens**: Inventory Exceptions Screen (`S-56`).
-- **Business Rules**: Returned serial from site moves to `RETURNED_QC`. Damage reporting requires photo and reason. Admin approval required for write-offs, updating stock movements and posting cost entry to project.
-- **Required Validations**: Reason ≥ 10 chars; photo required for damage.
-- **Required Error States**: 422 `REASON_REQUIRED`, 422 `PHOTO_REQUIRED`.
-- **Authorization Requirements**: Warehouse/Technician: Submit; Admin: Approve write-off.
-- **Audit Requirements**: Damage reports and write-off approvals audited.
-- **Test Cases**: `T-EXC-01` (damage reported requires admin approval before inventory write-off).
-- **Definition of Done**: Site returns quarantined; damaged goods require photo and Admin approval before write-off.
-- **Dependencies**: TASK-0.6, TASK-2.1.
-
----
-
-### TASK-2.7: Serial Number Traceability (Roof-to-Warehouse)
-- **Exact Implementation Objective**: Build unified serial number lifecycle audit page showing unbroken chain of custody.
-- **Files Expected to be Created**:
-  - `backend/src/modules/inventory/trace.service.js`
-  - `frontend/src/pages/staff/inventory/SerialTracePage.jsx` (`S-57`)
-- **Files Allowed to be Modified**: `backend/src/modules/inventory/stock.routes.js`, `stock.controller.js`.
-- **Database Changes**: Query joins across movements, serials, dispatches, jobs, warranties, and tickets.
-- **API Changes**: `GET /serials/:serial/trace`.
-- **Frontend Screens**: Serial Trace Screen (`S-57`).
-- **Business Rules**: Serial lookup displays complete chronological lineage: purchase invoice → project reservation → dispatch scan → rooftop installation → warranty record → service tickets.
-- **Required Validations**: Serial number format.
-- **Required Error States**: 404 `SERIAL_NOT_FOUND`.
-- **Authorization Requirements**: Admin, Warehouse, Support: Full trace; Sales: Limited.
-- **Audit Requirements**: Serial trace lookups logged.
-- **Test Cases**: `T-TRACE-01` / `AC-3` (serial lookup shows unbroken lineage from supplier to roof).
-- **Definition of Done**: Searching any serial displays complete history across all business modules in under 500ms.
-- **Dependencies**: TASK-2.4.
-
----
-
-### TASK-2.8: Technician Profiles & Unavailability Scheduling
-- **Exact Implementation Objective**: Manage technician profiles, skills, service areas, and leave/unavailability blocks.
-- **Files Expected to be Created**:
-  - `backend/src/migrations/042_technicians.sql`
-  - `backend/src/modules/technicians/technician.routes.js`, `technician.controller.js`, `technician.service.js`
-  - `frontend/src/pages/staff/technicians/TechnicianListPage.jsx` (`S-60`)
-  - `frontend/src/pages/staff/technicians/TechnicianSchedulePage.jsx` (`S-61`)
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Tables `technicians`, `technician_unavailability`.
-- **API Changes**: `GET /technicians`, `PATCH /technicians/:id`, `GET /technicians/:id/unavailability`, `POST /technicians/:id/unavailability`.
-- **Frontend Screens**: Technician Directory (`S-60`), Availability Scheduler (`S-61`).
-- **Business Rules**: Cost rate visible to Admin only. Daily job limits enforced. Scheduler checks leave blocks before assignment.
-- **Required Validations**: Unavailability start < end; non-negative cost rate.
-- **Required Error States**: 422 `INVALID_DATE_RANGE`.
-- **Authorization Requirements**: Admin: Full CRUD; Technician: Update own leave.
-- **Audit Requirements**: Profile updates and leave bookings audited.
-- **Test Cases**: `T-TECH-01` (technician cannot be scheduled during logged unavailability window).
-- **Definition of Done**: Technician skills and leave managed; schedule view displays blocked dates.
-- **Dependencies**: TASK-0.4.
-
----
-
-### TASK-2.9: Installation Job Scheduling & Multi-Technician Crew Assignment
-- **Exact Implementation Objective**: Create installation jobs and dispatch multi-technician crews (Lead and Helpers) with conflict detection.
-- **Files Expected to be Created**:
-  - `backend/src/migrations/043_installation_jobs.sql`
-  - `backend/src/modules/installation-jobs/job.routes.js`, `job.controller.js`, `job.service.js`
-  - `frontend/src/pages/staff/technicians/JobListPage.jsx` (`S-62`)
-  - `frontend/src/pages/staff/technicians/JobDetailPage.jsx` (`S-63`)
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Tables `installation_jobs`, `job_assignments`, `job_reschedules`.
-- **API Changes**: `POST /jobs`, `POST /jobs/:id/assign`, `POST /jobs/:id/reschedule`.
-- **Frontend Screens**: Job List (`S-62`), Job Detail (`S-63`).
-- **Business Rules**: Job creation checks project readiness (materials dispatched/ready). Assigns Lead and Helpers. Overlapping technician assignments rejected with 409 Conflict. Rescheduling records reason and requester.
-- **Required Validations**: At least one Lead technician required; scheduled start < end.
-- **Required Error States**: 409 `TECHNICIAN_OVERLAP_CONFLICT`, 422 `LEAD_TECHNICIAN_REQUIRED`.
-- **Authorization Requirements**: Admin: Create/Assign; Technician: Read assigned jobs only.
-- **Audit Requirements**: Job assignments and rescheduling audited.
-- **Test Cases**: `T-JOB-01` (assigning technician to two concurrent jobs returns 409 Conflict).
-- **Definition of Done**: Installation jobs dispatched to available crews; double bookings blocked; technicians see only assigned jobs.
-- **Dependencies**: TASK-2.4, TASK-2.8.
-
----
-
-### TASK-2.10: Mobile Installation Workflow, Testing Checklist & Signature
-- **Exact Implementation Objective**: Build mobile installation workflow with clock-in/out, photos, commissioning test checklist, and customer signature capture.
-- **Files Expected to be Created**:
-  - `backend/src/modules/installation-jobs/completion.validator.js`
-  - `frontend/src/pages/staff/technicians/MobileWorkPage.jsx` (`S-64`)
-  - `frontend/src/pages/staff/technicians/CompletionReviewPage.jsx` (`S-65`)
-- **Files Allowed to be Modified**: `backend/src/modules/installation-jobs/job.routes.js`, `job.controller.js`, `job.service.js`.
-- **Database Changes**: Tables `job_time_entries`, `job_photos`, `test_templates`, `test_results`, `signatures`.
-- **API Changes**: `POST /jobs/:id/start`, `POST /jobs/:id/time-entries`, `POST /jobs/:id/photos/sign`, `PUT /jobs/:id/system-details`, `PUT /jobs/:id/tests`, `POST /jobs/:id/signature`, `POST /jobs/:id/complete`.
-- **Frontend Screens**: Mobile Installation Workflow (`S-64`), Admin Completion Review (`S-65`).
-- **Business Rules**:
-  1. Completion strictly BLOCKED unless: actual start/end times recorded, all photo categories uploaded, system details match dispatch, test checklist complete and PASSED, and customer digital signature captured.
-  2. Failed test sets status to `Rework Required` and blocks completion until rework passes.
-  3. Completion moves job to `Completed` and order to `Installed`.
-- **Required Validations**: Signature payload non-empty; all test items passed.
-- **Required Error States**: 422 `COMPLETION_INCOMPLETE` with list of missing items.
-- **Authorization Requirements**: Assigned Technician, Admin.
-- **Audit Requirements**: Working hours, test results, signatures, and completions audited.
-- **Test Cases**: `T-14` / `AC-4` (completion rejected with missing items list), `T-15` (failed test sets Rework Required).
-- **Definition of Done**: Mobile crew executes workflow, passes electrical tests, captures signature, and completes job with zero missing requirements.
-- **Dependencies**: TASK-0.6, TASK-2.9.
-
----
-
-### TASK-2.11: Configurable Warranty Terms & Authoritative Warranty Records
-- **Exact Implementation Objective**: Implement multi-party warranty terms management (Manufacturer vs Installer) and active warranty record tracking.
-- **Files Expected to be Created**:
-  - `backend/src/migrations/044_warranties.sql`
-  - `backend/src/modules/warranties/warranty.routes.js`, `warranty.controller.js`, `warranty.service.js`
-  - `frontend/src/pages/staff/settings/WarrantySettingsPage.jsx` (`S-102`)
-  - `frontend/src/pages/staff/warranty/WarrantyListPage.jsx` (`S-70`)
-  - `frontend/src/pages/staff/warranty/WarrantyDetailPage.jsx` (`S-71`)
-  - `frontend/src/pages/portal/PortalWarrantiesPage.jsx` (`P-14`)
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Tables `warranty_terms`, `warranty_records`. Index on `serial_item_id`.
-- **API Changes**: `GET /warranties`, `GET /warranties/:id`, `POST /warranties/:id/void`, `POST /settings/warranty`.
-- **Frontend Screens**: Warranty Terms Settings (`S-102`), Warranty Search & Detail (`S-70`, `S-71`), Portal Warranties (`P-14`).
-- **Business Rules**: Sample durations: Inverter (24 mos), Battery (24 mos), Panels (240 mos). Terms changes apply only to future records. Start date derived from configured event (`DELIVERY` default); end date = start date + duration. Admin void requires reason.
-- **Required Validations**: Duration > 0; void reason mandatory.
-- **Required Error States**: 422 `VOID_REASON_REQUIRED`.
-- **Authorization Requirements**: Support/Admin: Manage; Customer: View own.
-- **Audit Requirements**: Terms changes, activations, and voids audited.
-- **Test Cases**: `T-16` (warranty records created with correct dates), `T-WAR-02` (voiding requires admin reason).
-- **Definition of Done**: Warranty records tracked per serial unit with party badges; customer portal displays active warranties.
-- **Dependencies**: TASK-2.4, TASK-2.5.
-
----
-
-### TASK-2.12: Authoritative Backend Warranty Eligibility Evaluator
-- **Exact Implementation Objective**: Build deterministic backend warranty eligibility evaluator returning explicit result codes.
-- **Files Expected to be Created**:
-  - `backend/src/modules/warranties/eligibility.service.js`
-- **Files Allowed to be Modified**: `backend/src/modules/warranties/warranty.routes.js`, `warranty.controller.js`.
-- **Database Changes**: None.
-- **API Changes**: `POST /warranties/eligibility`.
-- **Frontend Screens**: Warranty Detail Eligibility Panel (`S-71`).
-- **Business Rules**: Evaluates claim date against active record:
-  - `WITHIN_PERIOD`: Active and start_date <= claim_date <= end_date (shows remaining days/months).
-  - `EXPIRED`: Active and claim_date > end_date.
-  - `NOT_ACTIVE`: Pending Activation or start_date in future.
-  - `VOID`: Status Void.
-  - `NO_RECORD`: No record located.
-- **Required Validations**: Serial number or customer ID provided.
-- **Required Error States**: 400 `MISSING_LOOKUP_PARAM`.
-- **Authorization Requirements**: Support, Admin, Customer (own).
-- **Audit Requirements**: Eligibility evaluations logged during claim creation.
-- **Test Cases**: `T-16` / `AC-5` (18-month inverter claim returns `WITHIN_PERIOD`; 30-month returns `EXPIRED`).
-- **Definition of Done**: Evaluator returns 100% deterministic result codes with remaining duration; UI displays status badge.
-- **Dependencies**: TASK-2.11.
-
----
-
-## Phase 3: Razorpay Payments and Financial Ledger (Priority 3)
-*Owner: Member 4 | Prerequisite: Phase 1*
-
-### TASK-3.1: Server-Authoritative Razorpay Order Creation & Idempotency
-- **Exact Implementation Objective**: Implement server-side Razorpay order creation for advance/balance payments with strict idempotency key enforcement.
-- **Files Expected to be Created**:
-  - `backend/src/migrations/060_payments.sql`
-  - `backend/src/modules/payments/payment.routes.js`, `payment.controller.js`, `payment.service.js`
-  - `backend/src/modules/payments/razorpay.client.js`
-  - `frontend/src/pages/portal/PortalPaymentPage.jsx` (`P-13`)
-  - `frontend/src/api/finance.api.js`
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Table `payment_requests` (order_id, purpose, amount_paise, currency, status, razorpay_order_id, idempotency_key, is_test). Unique index on `razorpay_order_id` and `(order_id, purpose, idempotency_key)`.
-- **API Changes**: `POST /orders/:id/payment-requests`, `GET /payment-requests/:id`.
-- **Frontend Screens**: Customer Payment Portal (`P-13`) with test mode banner and Razorpay Checkout launcher.
-- **Business Rules**: Client NEVER provides payment amount. Backend derives exact paise from order total, advance policy [NC], and remaining balance. Requires `Idempotency-Key` header; repeated key returns same request without creating duplicate Razorpay orders. Sets `is_test = true`.
-- **Required Validations**: Idempotency-Key header present; remaining balance > 0.
-- **Required Error States**: 400 `IDEMPOTENCY_KEY_REQUIRED`, 422 `ZERO_BALANCE_REMAINING`.
-- **Authorization Requirements**: Customer (own order), Sales, Admin.
-- **Audit Requirements**: Payment request creation and idempotency re-hits audited.
-- **Test Cases**: `T-32` (repeated request with same Idempotency-Key returns identical order), `T-PAY-01` (client amount injection ignored).
-- **Definition of Done**: Customer clicks "Pay Advance"; backend calculates amount, creates Razorpay test order, returns order ID; frontend launches Checkout.
-- **Dependencies**: TASK-1.9.
-
----
-
-### TASK-3.2: Dual-Channel Signature Verification & Idempotent Ledger Application
-- **Exact Implementation Objective**: Implement cryptographic callback signature verification, raw-body webhook handler, and atomic single-ledger application.
-- **Files Expected to be Created**:
-  - `backend/src/modules/payments/webhook.controller.js`
-  - `backend/src/modules/payments/ledger.service.js`
-- **Files Allowed to be Modified**: `backend/src/modules/payments/payment.routes.js`, `payment.controller.js`, `payment.service.js`.
-- **Database Changes**: Tables `payment_attempts`, `payments`, `razorpay_webhook_events`. Unique index on `razorpay_payment_id`, `payments.attempt_id`, `razorpay_webhook_events.provider_event_id`.
-- **API Changes**: `POST /payment-requests/:id/verify`, `POST /webhooks/razorpay`.
-- **Frontend Screens**: Payment Status Page (`P-13`) with polling.
-- **Business Rules**: Never trust frontend success alone. Client callback verifies HMAC SHA256 signature using `RAZORPAY_KEY_SECRET`. Webhook verifies signature on raw request body using `RAZORPAY_WEBHOOK_SECRET`. Both channels route to `applyVerifiedPayment()` with row lock on `payment_requests` and `unique(attempt_id)`. Exactly ONE `payments` row is inserted. Updates order status (`Confirmed` if advance gate met) and balance. Duplicate webhooks return 200 OK as no-ops.
-- **Required Validations**: HMAC signature check; raw body buffer validation.
-- **Required Error States**: 400 `INVALID_PAYMENT_SIGNATURE`, 400 `INVALID_WEBHOOK_SIGNATURE`.
-- **Authorization Requirements**: Callback: authenticated; Webhook: signature-verified public route.
-- **Audit Requirements**: Every verified payment, webhook event, and signature failure audited.
-- **Test Cases**: `T-25` / `AC-2` (test mode payment verified and balance updated), `T-28` (invalid callback signature rejected), `T-29` (invalid webhook signature rejected 400), `T-30` (duplicate webhook delivery causes no second ledger entry), `T-33` (callback and webhook race creates exactly one payment row).
-- **Definition of Done**: Customer completes test payment; backend verifies signature cryptographically; balance updates; webhooks deduplicated cleanly.
-- **Dependencies**: TASK-3.1.
-
----
-
-### TASK-3.3: Admin Payment Reconciliation, Manual Payments & Policy Exceptions
-- **Exact Implementation Objective**: Build administrative reconciliation tools for mismatched payments, offline payment entry, and payment gate overrides.
-- **Files Expected to be Created**:
-  - `frontend/src/pages/staff/orders/PaymentListPage.jsx` (`S-42`)
-  - `frontend/src/pages/staff/orders/PaymentDetailPage.jsx` (`S-43`)
-  - `frontend/src/pages/staff/orders/PolicyExceptionsPage.jsx` (`S-44`)
-- **Files Allowed to be Modified**: `backend/src/modules/payments/payment.routes.js`, `payment.controller.js`, `payment.service.js`.
-- **Database Changes**: Tables `payment_reconciliations`, `policy_exceptions`.
-- **API Changes**: `POST /payment-requests/:id/reconcile`, `POST /payments/manual`, `POST /policy-exceptions/:id/approve`.
-- **Frontend Screens**: Payment List (`S-42`), Payment Detail & Reconciliation (`S-43`), Policy Exceptions (`S-44`).
-- **Business Rules**: Verified payments are immutable; adjustments require reversing entries. Admin can log manual cash/bank payments with proof document. Policy exceptions allow stock allocation or dispatch before required payment gate is met; requires Admin approval and justification.
-- **Required Validations**: Manual payment requires reference and proof document upload; reconcile requires reason.
-- **Required Error States**: 422 `PROOF_DOCUMENT_REQUIRED`.
-- **Authorization Requirements**: Admin only.
-- **Audit Requirements**: Reconciliations, manual payments, and policy exceptions audited.
-- **Test Cases**: `T-31` (payment mismatch under review), `T-PAY-02` (admin records manual bank transfer with proof).
-- **Definition of Done**: Admin resolves mismatched transactions, logs manual offline payments with proof, and approves policy overrides.
-- **Dependencies**: TASK-0.6, TASK-3.2.
-
----
-
-### TASK-3.4: Automated Invoicing, Receipts & Customer Balances
-- **Exact Implementation Objective**: Generate itemized invoices from accepted quotations, allocate payments, and compute balances strictly from ledger.
-- **Files Expected to be Created**:
-  - `backend/src/migrations/061_invoices.sql`
-  - `backend/src/modules/invoices/invoice.routes.js`, `invoice.controller.js`, `invoice.service.js`
-  - `frontend/src/pages/staff/finance/InvoiceListPage.jsx` (`S-90`)
-  - `frontend/src/pages/portal/PortalProjectPage.jsx` (`P-11`)
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Tables `invoices`, `invoice_items`. Unique index `invoice_code`.
-- **API Changes**: `POST /invoices`, `GET /invoices`, `POST /invoices/:id/void`.
-- **Frontend Screens**: Invoice Management (`S-90`), Customer Portal Project & Receipts (`P-11`).
-- **Business Rules**: Generated from accepted quotation BOM. Balances derived from ledger: `outstanding = order_total - verified_payments`. If verified payments > total, display "Overpaid — review required". Receipts generated for every verified payment.
-- **Required Validations**: Order must be in confirmed state; voiding requires reason.
-- **Required Error States**: 422 `VOID_REASON_REQUIRED`.
-- **Authorization Requirements**: Admin: Full CRUD; Sales: View own; Customer: View own.
-- **Audit Requirements**: Invoice issuance and voids audited.
-- **Test Cases**: `T-22` (order outstanding balance accurately reflects advance and balance payments).
-- **Definition of Done**: Invoices issued automatically; customer views itemized invoices and verified payment receipts on portal.
-- **Dependencies**: TASK-3.2.
-
----
-
-## Phase 4: Warranty Claims and Service Workflow (Priority 4)
-*Owner: Member 4 | Prerequisite: Phase 2, Phase 3*
-
-### TASK-4.1: Service Ticket Intake & Pre-Billing Warranty Enforcement
-- **Exact Implementation Objective**: Create formal service work tickets and strictly gate billing/charges behind recorded warranty coverage decisions.
-- **Files Expected to be Created**:
-  - `backend/src/migrations/062_service_tickets.sql`
-  - `backend/src/modules/service-tickets/ticket.routes.js`, `ticket.controller.js`, `ticket.service.js`
-  - `frontend/src/pages/staff/service/TicketListPage.jsx` (`S-80`)
-  - `frontend/src/pages/staff/service/TicketCreatePage.jsx` (`S-81`)
-  - `frontend/src/pages/staff/service/TicketDetailPage.jsx` (`S-82`)
-  - `frontend/src/api/support.api.js`
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Tables `service_tickets`, `service_charges`, `service_parts_used`.
-- **API Changes**: `POST /service-tickets`, `PATCH /service-tickets/:id/coverage`, `POST /service-tickets/:id/charges`.
-- **Frontend Screens**: Ticket List (`S-80`), Create (`S-81`), Detail (`S-82`).
-- **Business Rules**:
-  1. Serial lookup displays customer, project, install date, and warranty status.
-  2. **CRITICAL BILLING GUARD**: Adding charges is strictly blocked while `coverage_decision === 'PENDING'`.
-  3. Active warranty within period (`WITHIN_PERIOD`) routes to free covered repair [SRC]. Expired/uncovered routes to paid repair. Goodwill waiver on expired warranty requires Admin approval and reason [NC].
-- **Required Validations**: Serial number must exist; charge amount ≥ 0.
-- **Required Error States**: 422 `COVERAGE_PENDING` (returned when attempting to add charges before coverage is decided).
-- **Authorization Requirements**: Support, Admin.
-- **Audit Requirements**: Coverage decisions, goodwill waivers, and charge additions audited.
-- **Test Cases**: `T-18` (adding charges before coverage decision returns 422 `COVERAGE_PENDING`), `T-19` (covered vs not-covered routes to free vs paid path).
-- **Definition of Done**: Support creates service tickets; backend strictly prevents adding charges until warranty coverage is formally decided.
-- **Dependencies**: TASK-2.12.
-
----
-
-### TASK-4.2: Warranty Claims Lifecycle & Replacement Tracking
-- **Exact Implementation Objective**: Manage formal manufacturer/installer warranty claims, RMA tracking, and replacement serial linking.
-- **Files Expected to be Created**:
-  - `backend/src/modules/warranties/claims.service.js`
-  - `frontend/src/pages/staff/warranty/WarrantyClaimsPage.jsx` (`S-72`)
-- **Files Allowed to be Modified**: `backend/src/modules/warranties/warranty.routes.js`, `warranty.controller.js`.
-- **Database Changes**: Table `warranty_claims` (warranty_id, ticket_id, type, coverage_decision, decision_reason, decided_by, rma_ref, replacement_serial_id, status).
-- **API Changes**: `POST /warranty-claims`, `POST /warranty-claims/:id/decision`.
-- **Frontend Screens**: Warranty Claims Management (`S-72`).
-- **Business Rules**: Claims record RMA reference. Replacement serial links new unit, marks defective serial `REPLACED`, and creates superseding warranty record.
-- **Required Validations**: Replacement serial must exist and be in `IN_STOCK` status.
-- **Required Error States**: 422 `REPLACEMENT_SERIAL_INVALID`.
-- **Authorization Requirements**: Support: Propose; Admin: Approve exceptions.
-- **Audit Requirements**: Warranty claim decisions and replacement serial links audited.
-- **Test Cases**: `T-CLM-01` (replacement serial marks old serial REPLACED and creates new warranty record).
-- **Definition of Done**: Warranty claims processed with RMA tracking; replacement equipment updates inventory and warranty records seamlessly.
-- **Dependencies**: TASK-2.11, TASK-4.1.
-
----
-
-## Phase 5: AI-First Support Chain & Case Escalation (Priority 5)
-*Owner: Member 4 | Prerequisite: Phase 2, Phase 4*
-
-### TASK-5.1: Customer Issue Reporting & Pre-Model Safety Screen
-- **Exact Implementation Objective**: Build customer issue reporting intake with deterministic regex screening for electrical/fire hazards.
-- **Files Expected to be Created**:
-  - `backend/src/migrations/063_support_cases.sql`
-  - `backend/src/modules/support-cases/case.routes.js`, `case.controller.js`, `case.service.js`
-  - `backend/src/modules/support-cases/safety.interceptor.js`
-  - `frontend/src/pages/portal/PortalSupportNewPage.jsx` (`P-15`)
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Tables `support_cases`, `case_messages`, `help_articles`.
-- **API Changes**: `POST /cases`, `POST /cases/:id/messages`.
-- **Frontend Screens**: Customer Issue Report (`P-15`) with fixed safety notice and equipment picker.
-- **Business Rules**: Deterministic safety screening runs BEFORE any model call. Keywords matching smoke, burning smell, fire, sparks, shock, exposed wire, or swollen battery immediately set `safety_flag = true`, `priority = 'P1'`, bypass AI guidance, show fixed safety notice, and alert Support and Admin. Model or customer cannot downgrade P1.
-- **Required Validations**: Description non-empty; equipment reference must belong to customer.
-- **Required Error States**: 403 `EQUIPMENT_NOT_OWNED`.
-- **Authorization Requirements**: Customer (own), Support, Admin.
-- **Audit Requirements**: Case intake and safety flag triggers audited with client IP.
-- **Test Cases**: `T-40` / `AC-8` ("burning smell" sets P1, displays safety notice, alerts staff, and bypasses AI guidance).
-- **Definition of Done**: Customer reports issue; safety scanner intercepts hazards immediately; non-safety cases proceed to triage.
-- **Dependencies**: TASK-0.6, TASK-4.1.
-
----
-
-### TASK-5.2: 33-Transition Support Case State Machine
-- **Exact Implementation Objective**: Implement finite state machine enforcing the 33 valid status transitions and 5-stage human escalation chain.
-- **Files Expected to be Created**:
-  - `backend/src/modules/support-cases/state-machine.js`
-  - `frontend/src/pages/staff/service/SupportQueuePage.jsx` (`S-83`)
-  - `frontend/src/pages/staff/service/CaseDetailPage.jsx` (`S-84`)
-  - `frontend/src/pages/portal/PortalCaseDetailPage.jsx` (`P-16`)
-- **Files Allowed to be Modified**: `backend/src/modules/support-cases/case.routes.js`, `case.controller.js`, `case.service.js`.
-- **Database Changes**: Tables `case_transitions`, `case_escalations`.
-- **API Changes**: `GET /cases`, `GET /cases/:id`, `POST /cases/:id/pickup`, `POST /cases/:id/classification`, `POST /cases/:id/escalate-admin`.
-- **Frontend Screens**: Support Queue (`S-83`) with P1 pinned, Staff Case Detail & Timeline (`S-84`), Customer Case Timeline (`P-16`).
-- **Business Rules**: Enforces transitions strictly per §9.5. Unlisted transitions rejected with 422. Customer view strictly excludes `case_messages` with `visibility = 'INTERNAL'`. Support can confirm/override AI classification (recorded in DB). Moving to Admin requires category, priority, coverage proposal, and summary.
-- **Required Validations**: Valid state pair in `case_transitions`; role authorized for transition.
-- **Required Error States**: 422 `CASE_TRANSITION_NOT_ALLOWED`.
-- **Authorization Requirements**: Role-scoped per transition table.
-- **Audit Requirements**: Every state transition logged to `status_history` and `audit_logs`.
-- **Test Cases**: `T-47` (invalid state transition rejected), `T-48` (internal notes excluded from customer API response).
-- **Definition of Done**: Support cases transition strictly through authorized states; internal notes remain invisible to customers; timelines render accurately.
-- **Dependencies**: TASK-5.1.
-
----
-
-### TASK-5.3: Admin Service Review, Technician Assignment & Work Submission
-- **Exact Implementation Objective**: Implement Admin service authorization queue, conflict-checked crew assignment, and technician mobile execution.
-- **Files Expected to be Created**:
-  - `frontend/src/pages/staff/service/AdminServiceApprovalPage.jsx` (`S-85`)
-  - `frontend/src/pages/staff/service/TechnicianServiceJobsPage.jsx` (`S-87`)
-  - `frontend/src/pages/staff/service/TechnicianServiceCompletePage.jsx` (`S-88`)
-- **Files Allowed to be Modified**: `backend/src/modules/support-cases/case.routes.js`, `case.controller.js`, `case.service.js`.
-- **Database Changes**: Table `case_approvals`.
-- **API Changes**: `POST /cases/:id/admin-decision`, `POST /cases/:id/assign`, `POST /cases/:id/technician-updates`, `POST /cases/:id/technician-complete`.
-- **Frontend Screens**: Admin Service Queue (`S-85`), Technician Assigned Jobs (`S-87`), Technician Work Submission (`S-88`).
-- **Business Rules**: Admin reviews issue, coverage, and operational impact. Approves/rejects/returns. Assigns technician with schedule conflict check. Technician sees only customer address, issue summary, and approved work instructions. Technician submits work notes and parts used; unresolved repairs return case to `Escalated to Support`. Technician completion moves case to `Awaiting Support Review`—it NEVER closes the case.
-- **Required Validations**: Technician must be available; conflict check passes.
-- **Required Error States**: 409 `TECHNICIAN_CONFLICT`.
-- **Authorization Requirements**: Admin: Approve/Assign; Technician: View assigned and submit work.
-- **Audit Requirements**: Admin decisions, assignments, and technician submissions audited.
-- **Test Cases**: `T-42` (assignment blocked without Admin approval), `T-44` (technician completion does not close case).
-- **Definition of Done**: Admin authorizes service visit; technician completes field repair; case advances to Support review without premature closure.
-- **Dependencies**: TASK-2.8, TASK-5.2.
-
----
-
-### TASK-5.4: Multi-Check Resolution Review & Customer-Confirmed Closure
-- **Exact Implementation Objective**: Implement Support resolution evidence review and enforce mandatory customer confirmation prior to case closure.
-- **Files Expected to be Created**:
-  - `frontend/src/pages/staff/service/ResolutionReviewPage.jsx` (`S-89`)
-- **Files Allowed to be Modified**: `backend/src/modules/support-cases/case.routes.js`, `case.controller.js`, `case.service.js`.
-- **Database Changes**: Table `customer_confirmations`.
-- **API Changes**: `POST /cases/:id/support-review`, `POST /cases/:id/customer-confirmation`, `POST /cases/:id/reopen`, `POST /cases/:id/close`.
-- **Frontend Screens**: Support Resolution Review (`S-89`), Customer Case Detail (`P-16`) with Confirm/Dispute buttons.
-- **Business Rules**:
-  1. Support reviews technician work evidence and requests customer confirmation.
-  2. Customer clicks "Confirm Resolved" or "Dispute / Issue Persists" on portal.
-  3. **CRITICAL CLOSURE GUARD**: Case closure (`POST /cases/:id/close`) strictly blocked unless technician work complete, Support evidence accepted, customer confirmation recorded, charges paid/waived, and no open child jobs.
-  4. If customer disputes, status moves to `Reopened`, priority increments, and returns to Support Review.
-- **Required Validations**: Customer confirmation record must exist.
-- **Required Error States**: 422 `CLOSURE_CHECKS_FAILED` with list of unmet criteria.
-- **Authorization Requirements**: Customer: Confirm/Dispute; Support/Admin: Close.
-- **Audit Requirements**: Customer confirmations, disputes, and closures audited.
-- **Test Cases**: `T-21` / `AC-6` (closing case without customer confirmation returns 422 `CLOSURE_CHECKS_FAILED`), `T-45` (customer dispute reopens case).
-- **Definition of Done**: Cases close only after customer sign-off and complete administrative verification; disputes reopen cleanly.
-- **Dependencies**: TASK-5.3.
-
----
-
-## Phase 6: Financial Visibility, Expenses & Dashboards (Priority 6)
-*Owner: Member 4 | Prerequisite: Phase 3, Phase 5*
-
-### TASK-6.1: Project Profitability & Financial Health Analytics
-- **Exact Implementation Objective**: Build real-time project P/L calculation engine distinguishing actual costs from estimated BOM figures.
-- **Files Expected to be Created**:
-  - `backend/src/modules/finance/profitability.service.js`
-  - `frontend/src/pages/staff/finance/ProjectProfitabilityPage.jsx` (`S-94`)
-- **Files Allowed to be Modified**: `backend/src/modules/finance/finance.routes.js`, `finance.controller.js`.
-- **Database Changes**: Queries spanning `orders`, `serial_items`, `job_time_entries`, `expenses`, `service_charges`.
-- **API Changes**: `GET /projects/:id/profitability`, `GET /reports/profitability`.
-- **Frontend Screens**: Project Profitability Screen (`S-94`).
-- **Business Rules**: Formula:
-  `Profit = Contract Revenue - (Material Cost + Labor Cost + Other Direct Costs + Unbilled Service Costs)`.
-  `Margin % = Profit / Contract Revenue`.
-  Dispatched items priced at actual serial receipt cost; non-serialized at weighted average. Labor cost = approved hours * technician rate. All figures explicitly labeled **Actual** vs **Estimate**. Overheads excluded by default [NC].
-- **Required Validations**: Contract revenue > 0.
-- **Required Error States**: 404 `PROJECT_NOT_FOUND`.
-- **Authorization Requirements**: Admin only.
-- **Audit Requirements**: Access to financial P/L audited.
-- **Test Cases**: `T-23` / `AC-12` (project profitability math reconciles against manual calculation using §7.7 formula).
-- **Definition of Done**: Admin views itemized revenue, actual material costs, labor, and net margin for any project with clear actual/estimate tags.
-- **Dependencies**: TASK-2.4, TASK-2.10, TASK-3.4, TASK-4.1.
-
----
-
-### TASK-6.2: Secondary Financial Tracking: Expenses, Timesheets & Subsidy Tracker
-- **Exact Implementation Objective**: Implement project direct expense logging, technician timesheet approvals, and government subsidy document tracking.
-- **Files Expected to be Created**:
-  - `backend/src/migrations/064_finance_aux.sql`
-  - `backend/src/modules/finance/expenses.service.js`, `timesheets.service.js`, `subsidy.service.js`
-  - `frontend/src/pages/staff/finance/ExpensesPage.jsx` (`S-91`)
-  - `frontend/src/pages/staff/finance/TechnicianPayPage.jsx` (`S-92`)
-  - `frontend/src/pages/staff/finance/SubsidyTrackerPage.jsx` (`S-93`)
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Tables `expenses`, `expense_categories`, `technician_pay_records`, `subsidy_applications`.
-- **API Changes**: `POST /expenses`, `POST /expenses/:id/approve`, `POST /timesheets/:id/approve`, `GET /pay-records`, `GET /subsidy/:projectId`, `PATCH /subsidy/:projectId`.
-- **Frontend Screens**: Expenses (`S-91`), Technician Pay Records (`S-92`), Subsidy Tracker (`S-93`).
-- **Business Rules**: Expenses only count toward project costs after Admin approval. Timesheet approvals lock hours. Subsidy tracker tracks document checklist and receivable amounts only; NO statutory eligibility rules are implemented [NC]. Statutory payroll deductions are out of scope.
-- **Required Validations**: Expense amount > 0; non-negative hours.
-- **Required Error States**: 422 `INVALID_FINANCIAL_AMOUNT`.
-- **Authorization Requirements**: Admin: Approve expenses, timesheets, pay records; Sales: Upload subsidy docs.
-- **Audit Requirements**: Expense and timesheet approvals audited.
-- **Test Cases**: `T-FIN-01` (unapproved expense excluded from P/L; approved expense included).
-- **Definition of Done**: Auxiliary costs tracked; timesheets approved; subsidy documents monitored through submission lifecycle.
-- **Dependencies**: TASK-0.6, TASK-2.10.
-
----
-
-### TASK-6.3: Role-Aware Dashboards & Metric Reconciliation Widget
-- **Exact Implementation Objective**: Build role-specific executive dashboards with server-computed metrics and mathematical payment reconciliation widget.
-- **Files Expected to be Created**:
-  - `backend/src/modules/dashboards/dashboard.routes.js`, `dashboard.controller.js`, `dashboard.service.js`
-  - `frontend/src/pages/staff/DashboardPage.jsx` (`S-01`)
-  - `frontend/src/pages/portal/PortalHomePage.jsx` (`P-10`)
-  - `frontend/src/components/finance/ReconciliationWidget.jsx`
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Optimized aggregation queries and indices.
-- **API Changes**: `GET /dashboard/:role`.
-- **Frontend Screens**: Staff Dashboard (`S-01`), Customer Portal Home (`P-10`).
-- **Business Rules**: All metrics computed server-side. Every metric links to drill-down list. Admin dashboard contains authoritative reconciliation widget: `dashboard total - sum(verified payments) = 0`. Seeded demo data carries global demo banner.
-- **Required Validations**: Role-scoped query filtering.
-- **Required Error States**: 403 Forbidden for unauthorized dashboard role view.
-- **Authorization Requirements**: Dynamic per authenticated user role.
-- **Audit Requirements**: Dashboard views logged.
-- **Test Cases**: `T-24` / `AC-9` (dashboard payment totals equal verified payments ledger with 0 discrepancy).
-- **Definition of Done**: Every role sees a personalized, real-time dashboard; reconciliation widget proves 0 discrepancy between metrics and ledger.
-- **Dependencies**: TASK-3.2, TASK-6.1, TASK-6.2.
-
----
-
-## Phase 7: AI Assistance Layer MVP (Priority 7)
-*Owner: Member 4 | Prerequisite: Phase 1, Phase 4, Phase 5*
-
-### TASK-7.1: Sandboxed AI Layer Foundation & Output Validator
-- **Exact Implementation Objective**: Implement the internal Express `ai` module with caller-permission scoping, prompt templates, output validator, and mock provider default.
-- **Files Expected to be Created**:
-  - `backend/src/migrations/065_ai.sql`
-  - `backend/src/modules/ai/ai.routes.js`, `ai.controller.js`, `ai.service.js`
-  - `backend/src/modules/ai/context.builder.js`
-  - `backend/src/modules/ai/output.validator.js`
-  - `backend/src/modules/ai/providers/mock.provider.js`
-  - `frontend/src/components/ai/AIPanel.jsx`
-  - `frontend/src/api/ai.api.js`
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Table `ai_requests` (user_id, feature, entity_refs, provider_mode, status, latency_ms, input_hash, output_hash, fallback_used). No raw prompts stored.
-- **API Changes**: Base `/ai/*` routes.
-- **Frontend Screens**: Reusable Labeled AI Panel (`--color-ai` purple tint, "AI-generated" badge, source record links, Regenerate button, demo template banner, fallback notice).
-- **Business Rules**: Default provider is `mock` (deterministic templates). Runs strictly as the authenticated caller; context builder enforces same row scopes as REST API. AI CANNOT perform mutating actions. Output validator checks cited IDs and numbers against context; falls back to template on mismatch. No PII/photos sent to external models.
-- **Required Validations**: Max input 4,000 characters; caller permission verified on every cited entity.
-- **Required Error States**: Return deterministic template with `fallbackUsed: true` on any model timeout or error.
-- **Authorization Requirements**: Authenticated users with respective read permissions.
-- **Audit Requirements**: Requests logged to `ai_requests` with input/output hashes and latency.
-- **Test Cases**: `T-35` (output citations grounded in context), `T-37` (asking about unauthorized record returns neutral refusal), `T-38` (provider failure returns graceful fallback).
-- **Definition of Done**: AI panel renders clean summaries; output validator blocks hallucinations; fallback works when mock provider is active.
-- **Dependencies**: TASK-0.4, TASK-0.5.
-
----
-
-### TASK-7.2: Concrete AI MVP Integrations: Summaries, Missing Info, Warranty & Triage
-- **Exact Implementation Objective**: Wire up the 5 core AI MVP capabilities: Enquiry Summary (AI-A1), Missing-Info Check (AI-A2), Case Summary (AI-D1), Warranty Plain-Language Explanation (AI-E1), and Customer Triage (AI-G1).
-- **Files Expected to be Created**:
-  - `backend/src/modules/ai/features/enquiry-summary.js`
-  - `backend/src/modules/ai/features/missing-info.js`
-  - `backend/src/modules/ai/features/case-summary.js`
-  - `backend/src/modules/ai/features/warranty-explain.js`
-  - `backend/src/modules/ai/features/customer-triage.js`
-- **Files Allowed to be Modified**:
-  - `frontend/src/pages/staff/customers/EnquiryDetailPage.jsx` (`S-14`)
-  - `frontend/src/pages/staff/service/CaseDetailPage.jsx` (`S-84`)
-  - `frontend/src/pages/staff/warranty/WarrantyDetailPage.jsx` (`S-71`)
-  - `frontend/src/pages/portal/PortalWarrantiesPage.jsx` (`P-14`)
-  - `frontend/src/pages/portal/PortalSupportNewPage.jsx` (`P-15`)
-- **Database Changes**: Seeds `help_articles` with approved troubleshooting content.
-- **API Changes**:
-  - `POST /ai/enquiries/:id/summary`
-  - `POST /ai/enquiries/:id/missing-info`
-  - `POST /ai/cases/:id/summary`
-  - `POST /ai/warranties/:id/explain`
-  - `POST /ai/cases/:id/triage`
-- **Frontend Screens**: Enquiry Detail (`S-14`), Case Detail (`S-84`), Warranty Detail (`S-71`), Portal Warranties (`P-14`), Portal Support (`P-15`).
-- **Business Rules**:
-  - Missing info check (AI-A2) is 100% deterministic based on required field rules.
-  - Warranty explanation (AI-E1) returns two distinct panels: (1) Authoritative backend result badge, (2) Plain-language explanation. Output validator asserts explanation matches backend dates and terms.
-  - Triage (AI-G1) provides non-hazardous advice strictly derived from approved help articles (`help_articles.status = 'Approved'`).
-- **Required Validations**: Grounded context assertion; cited record must exist in context payload.
-- **Required Error States**: Fallback template returned if validator rejects output.
-- **Authorization Requirements**: Respective module read permissions.
-- **Audit Requirements**: Invocations recorded in `ai_requests`.
-- **Test Cases**: `T-20` (18-month inverter warranty explained clearly alongside WITHIN_PERIOD badge), `T-CASE-01` (guided triage pulls approved help article).
-- **Definition of Done**: Sales can summarize leads and view missing info; Support views case summaries; customers see plain-language warranty explanations and triage advice.
-- **Dependencies**: TASK-7.1.
-
----
-
-## Phase 8: Integration Polish, Seeded Demo & Rehearsal (Priority 8)
-*Collaborative All Members | Prerequisite: Phases 0–7*
-
-### TASK-8.1: Master Demo Seed Data Generator (`SEED_DEMO_DATA`)
-- **Exact Implementation Objective**: Create a deterministic seed script populating a coherent end-to-end dataset labeled as fictional demo data.
-- **Files Expected to be Created**:
-  - `backend/src/scripts/seed.js`
-  - `backend/src/scripts/seedData.json`
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Seeds realistic 3 kW On-Grid and 5 kW Off-Grid packages, products, inventory with serial numbers, customers, surveys, orders, technicians, and warranty records.
-- **API Changes**: None.
-- **Frontend Screens**: Global banner displays: "Demo data — fictional company, not affiliated with any real SunPower company."
-- **Business Rules**: All demo records carry `is_demo = true` or demo prefixes. Passwords standard for demo users (`demo123!`). Never commit live production credentials.
-- **Required Validations**: Seed script idempotency (can run multiple times without duplicating keys).
-- **Required Error States**: None.
-- **Authorization Requirements**: CLI / Admin script.
-- **Audit Requirements**: Seed execution logged.
-- **Test Cases**: `T-SEED-01` (seed script runs cleanly on empty DB and populates full test environment).
-- **Definition of Done**: Running `npm run db:seed` provisions a complete demo environment ready for live hackathon demonstration.
-- **Dependencies**: All prior database migrations.
-
----
-
-### TASK-8.2: End-to-End Workflow Verification & Acceptance Criteria Validation
-- **Exact Implementation Objective**: Execute automated and manual end-to-end test suite verifying the 26-stage workflow (§10.2) and critical acceptance criteria (`AC-1` to `AC-12`).
-- **Files Expected to be Created**:
-  - `backend/tests/e2e/workflow.test.js`
-  - `backend/tests/e2e/payment-webhook.test.js`
-  - `backend/tests/e2e/safety-escalation.test.js`
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: None.
-- **API Changes**: None.
-- **Frontend Screens**: End-to-end browser verification.
-- **Business Rules**: Verify survey gate blocks quotation; test-mode payment verifies and decrements balance; serial scans link to roof; test checklist required for install completion; warranty checks precede service charges; safety signals trigger P1; customer confirmation required for case closure.
-- **Required Validations**: All 50 test cases (`T-01` to `T-50`) pass.
-- **Required Error States**: Ensure all negative and boundary tests return expected error envelopes.
-- **Authorization Requirements**: All 5 roles verified.
-- **Audit Requirements**: Complete audit trail verified end-to-end.
-- **Test Cases**: `T-04` (happy path 26 stages), `AC-1` through `AC-12`.
-- **Definition of Done**: 100% of critical acceptance criteria pass automated regression tests and manual browser execution.
-- **Dependencies**: All Phase 0–7 tasks.
-
----
-
-### TASK-8.3: Hackathon Demo Rehearsal & Deployment Readiness (Vercel / Render)
-- **Exact Implementation Objective**: Deploy backend and PostgreSQL to Render, deploy frontend to Vercel, configure Razorpay test webhooks, and rehearse the 16-step connected demo script (§21.2).
-- **Files Expected to be Created**:
-  - `render.yaml`
-  - `vercel.json`
-  - `README.md` (Deployment and demo guide)
-- **Files Allowed to be Modified**: None.
-- **Database Changes**: Remote Render PostgreSQL migration and seed.
-- **API Changes**: Webhook registered on Razorpay test dashboard.
-- **Frontend Screens**: Live deployed URL on Vercel.
-- **Business Rules**: Live demo operates in test mode only; banner clearly visible; API kept warm to prevent cold start webhook delays.
-- **Required Validations**: HTTPS certificates active; CORS origins restricted; environment secrets populated on Render and Vercel.
-- **Required Error States**: Graceful UI error boundaries and offline fallbacks.
-- **Authorization Requirements**: Production deployment credentials.
-- **Audit Requirements**: Deployed system audit log operational.
-- **Test Cases**: `T-DEMO-01` (complete 16-step demo script executed on live deployed URLs).
-- **Definition of Done**: Live deployed platform executes steps 1–16 of connected demo flawlessly; judge Q&A answers prepared.
-- **Dependencies**: TASK-8.1, TASK-8.2.
+### Task 16.2: Exception & Negative Path Resilience Verification
+- **Objective:** Test all documented failure modes: survey rework, inventory shortage, unscanned serial dispatch block, failed earthing test, replayed webhook, expired warranty billing, unauthorized AI actions.
+- **Files Created:** `backend/tests/integration/exception_paths.test.js`.
+- **Files Modified:** None.
+- **Database Changes:** None.
+- **API Changes:** None.
+- **Frontend Screens:** Verification of error banners and recovery flows.
+- **Business Rules:** Every business gate strictly halts unauthorized execution and logs security audit.
+- **Validations:** Boundary and negative payload tests.
+- **Error States:** Expected HTTP 400, 403, 409, 422 codes verified.
+- **Authorization:** Security test harness.
+- **Audit Req:** All expected security alerts recorded.
+- **Test Cases:** TC-EXC-001 to TC-EXC-008 (All 8 core exception paths).
+- **Definition of Done:** All exception scenarios gracefully handled with clear user feedback and audit trails.
+- **Dependencies:** Task 16.1.

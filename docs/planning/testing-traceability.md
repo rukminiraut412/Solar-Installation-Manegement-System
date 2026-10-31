@@ -1,151 +1,108 @@
-# Solar Installation Management System
-## Testing Strategy & Requirement Traceability Matrix
-
-**Document Version:** 1.0  
-**Status:** Approved Architectural Baseline  
-**Authority:** `SOLAR_MANAGEMENT_SYSTEM.md` (§20 Testing and Acceptance Criteria)  
-**Test Categories Covered:** Unit, API Integration, Database Invariant, Authorization (RBAC), Validation & Boundary, Negative, Concurrency, Payment & Webhook, AI Guardrail & Fallback, and End-to-End Workflow.
+# TESTING TRACEABILITY MATRIX & QUALITY ASSURANCE PLAN
+**Project:** Solar Installation Management System (SunPower Solutions)  
+**Test Frameworks:** Vitest (Frontend & Unit), Supertest / Mocha (API Integration), pg-mem / PostgreSQL Test DB  
+**Target Coverage:** > 90% Business Logic, 100% Critical Gates  
+**Document Version:** 1.0.0  
 
 ---
 
-## 1. Testing Framework & Tooling
+## 1. Testing Strategy & Level Definitions
 
-| Test Level | Technology / Tool | Target Execution Environment | Purpose |
-|---|---|---|---|
-| **Unit Testing** | Vitest / Jest | In-memory mock environment | Fast mathematical & algorithmic testing (BOM calculations, date logic, string normalization, output validation). |
-| **API Integration** | Supertest + Express | Local test database (`solar_test`) | HTTP route handling, controller logic, middleware chaining, JSON envelopes, and status codes. |
-| **Database Invariants** | PostgreSQL + node-pg | Isolated test schema | Verification of unique indexes, CHECK constraints, foreign key cascades, triggers, and row-level locks. |
-| **Authorization (RBAC)**| Supertest with JWT fixtures | Test DB with pre-seeded role permissions | Matrix testing of 5 roles + Customer across all protected endpoints; row-level isolation verification. |
-| **Concurrency & Race** | Async worker scripts (`Promise.all` bursts) | Multi-connection test pool | Dual serial scanning race conditions, simultaneous webhook & callback arrivals, optimistic lock conflicts. |
-| **Payment & Webhooks** | Supertest + HMAC fixtures | Mock Razorpay server | Signature generation/verification, webhook replay attacks, raw body tampering, idempotency key replays. |
-| **AI Boundary Tests** | Mock AI Provider | Isolated API runner | Context building permission scope, hallucination rejection, safety pattern interception, fallback failover. |
-| **End-to-End (E2E)** | Playwright | Full stack (Vite + Express + Postgres) | Full 26-stage workflow simulation, customer signature canvas, file uploads, role switching, UI state assertions. |
+| Test Level | Scope | Execution Target | Automation Tool |
+| :--- | :--- | :--- | :--- |
+| **Unit (UT)** | Pure functions, calculations (BOM, margins, tax, warranty dates) | Isolated JS modules | Vitest / Jest |
+| **Validation / Negative (VAL)** | Input constraints, Zod schema violations, error status codes | Express route handlers | Supertest |
+| **Database & Concurrency (DB/CON)** | Foreign keys, unique constraints, transactional locks (`FOR UPDATE`) | PostgreSQL instance | pg-tap / pg-node |
+| **Authorization (AUTH/RBAC)** | Least-privilege role boundaries across the 5 user roles | Middleware layer | Supertest |
+| **External Integration (INT)** | Razorpay Test Mode HMAC, Cloudinary signatures, Mock AI adapter | Gateway services | Supertest / nock |
+| **End-to-End Workflow (E2E)** | Full 26-stage customer journey from inquiry to warranty & service | System integration | Vitest / Playwright |
 
 ---
 
-## 2. Master Test Matrix (T-01 through T-50 Traceability)
+## 2. Requirement-to-Test Traceability Matrix
 
-The 50 authoritative tests defined in §20.1 of the architecture specification mapped to their requirement IDs, test type, test scenario, and expected outcome:
+### MODULE 1: PLATFORM FOUNDATION & SECURITY
 
-| Test ID | Requirement IDs | Test Category | Target Component / Scenario | Detailed Test Input & Execution | Expected Assertions & HTTP Response |
-|---|---|---|---|---|---|
-| **T-01** | REQ-FND-03, REQ-FND-04 | Authorization (RBAC) | Role-Based Access Control violation across all modules | For each role (Sales, Warehouse, Tech, Support, Customer), send requests to unauthorized endpoints (e.g. Sales calls `/stock-purchases`, Tech calls `/payments`). | Status `403 FORBIDDEN`; standard error envelope; zero record alteration; denial event logged to `audit_logs`. |
-| **T-02** | REQ-CS-01, REQ-CS-02 | Validation / Negative | Create enquiry with duplicate phone number | Staff submits `POST /customers` with phone matching existing customer without providing `duplicateDecision`. | Status `409 CONFLICT`; error code `DUPLICATE_CANDIDATE`; returns matching customer preview; record not created. |
-| **T-03** | REQ-CS-01 | Boundary / Rate Limit | Public web enquiry spam burst | Script dispatches 10 rapid `POST /public/enquiries` requests from the same IP within 1 second. | First 5 requests return `200 OK` with `ENQ-` code; subsequent requests return `429 TOO_MANY_REQUESTS`. |
-| **T-04** | All Core Requirements | End-to-End (E2E) | Full Happy Path Journey (§10.2 Steps 1–24) | Lead created → Survey scheduled → Survey submitted & approved → Quotation generated & accepted → Advance paid & verified → Stock reserved → Serials scanned & dispatched → Installed with tests & signature → Warranty activated → Ticket created & closed with confirmation. | All 24 workflow checkpoints complete successfully; order reaches `Installed`; all foreign keys resolve cleanly; full audit trail exists. |
-| **T-05** | REQ-CS-06 | Validation / Negative | Reject survey without mandatory reason | Admin calls `POST /surveys/:id/reject` with empty comment or comment < 10 characters. | Status `422 UNPROCESSABLE_ENTITY`; error code `REJECTION_REASON_REQUIRED`; survey status remains `Submitted`. |
-| **T-06** | REQ-CS-06 | API Integration | Survey rejection, rework, resubmission, approval loop | 1. Admin rejects survey with reason.<br>2. Surveyor calls `/resubmit` with updated findings.<br>3. Admin calls `/approve`. | Survey moves `Submitted` → `Rejected` (`Rework Required`) → `Submitted` (with `revision_no = 2`) → `Approved`. Historical revisions preserved. |
-| **T-07** | REQ-CS-07 | Business Rule / Guard | Create quotation before survey approval | Sales calls `POST /quotations` referencing a survey whose status is `Submitted` or `Rejected`. | Status `422 UNPROCESSABLE_ENTITY`; error code `SURVEY_NOT_APPROVED`; quotation row is NOT created in database. |
-| **T-08** | REQ-CS-08 | Compatibility / Negative | Off-Grid package quotation without battery line | Sales calls `POST /quotations/:id/issue` for an Off-Grid system where battery item was manually removed. | Status `422 UNPROCESSABLE_ENTITY`; error code `COMPATIBILITY_RULE_VIOLATION`; message specifies battery requirement. |
-| **T-09** | REQ-OPS-03, REQ-OPS-04 | Database / Business Rule | Dispatch quantity exceeding available or reserved stock | Warehouse calls `POST /dispatches` requesting 10 inverters when only 5 are reserved for the project. | Status `422 UNPROCESSABLE_ENTITY`; error code `INSUFFICIENT_STOCK`; dispatch creation aborted; zero stock movements written. |
-| **T-10** | REQ-OPS-04 | Business Rule / Guard | Scan serial already active on another project | Warehouse calls `POST /dispatches/:id/scan` with a serial number currently in `DISPATCHED` status on another project. | Status `422 UNPROCESSABLE_ENTITY`; error code `SERIAL_ALREADY_ASSIGNED`; serial is rejected; dispatch count unchanged. |
-| **T-11** | REQ-OPS-04 | Concurrency Race | Concurrent scanning of the same physical serial | Two parallel asynchronous HTTP requests call `POST /dispatches/:id/scan` for the identical serial number simultaneously. | Exactly ONE request succeeds (`200 OK`); the second request fails with `422 SERIAL_ALREADY_ASSIGNED` due to row lock. |
-| **T-12** | REQ-OPS-02, REQ-OPS-04 | Validation / Negative | Scan unknown or wrong-product serial | Warehouse calls `POST /dispatches/:id/scan` with non-existent serial or battery serial against an inverter BOM line. | Status `422 UNPROCESSABLE_ENTITY`; specific error codes `SERIAL_UNKNOWN` or `SERIAL_WRONG_PRODUCT`. |
-| **T-13** | REQ-OPS-04 | Validation / Guard | Confirm dispatch with scan count mismatch | Dispatch note has required quantity 4, but only 3 serials scanned. Warehouse calls `POST /dispatches/:id/confirm`. | Status `422 UNPROCESSABLE_ENTITY`; error code `SCAN_COUNT_MISMATCH`; dispatch remains in `Scanning` status. |
-| **T-14** | REQ-OPS-10 | Validation / Guard | Complete installation with missing items | Technician calls `POST /jobs/:id/complete` missing photos, test results, or signature. | Status `422 UNPROCESSABLE_ENTITY`; error code `COMPLETION_INCOMPLETE`; response payload lists exact missing items. |
-| **T-15** | REQ-OPS-10 | Business Rule / Negative | Installation commissioning test failure | Technician calls `PUT /jobs/:id/tests` recording an earthing resistance test failure (`passed: false`). | Job status transitions to `Rework Required`; subsequent call to `/complete` returns 422; revisit must be scheduled. |
-| **T-16** | REQ-OPS-11, REQ-OPS-12 | Unit / Database | Warranty period eligibility evaluation | Check eligibility for 4 scenarios: claim date within term, claim date after term, inactive warranty, unknown serial. | Returns authoritative codes: `WITHIN_PERIOD` (with remaining days), `EXPIRED`, `NOT_ACTIVE`, and `NO_RECORD`. |
-| **T-17** | REQ-OPS-05, REQ-OPS-11 | Integration / Event | Warranty start event on delivery | Warehouse calls `POST /dispatches/:id/deliver` with `delivered_at = "2026-11-01"`. | Linked warranty records transition `Pending Activation` → `Active`; `start_date` set to `2026-11-01`; `end_date` computed correctly. |
-| **T-18** | REQ-SFA-03 | Business Rule / Guard | Add charges to service ticket before coverage decision | Support calls `POST /service-tickets/:id/charges` while ticket `coverage_decision === 'PENDING'`. | Status `422 UNPROCESSABLE_ENTITY`; error code `COVERAGE_PENDING`; charge entry is strictly rejected. |
-| **T-19** | REQ-SFA-03 | Business Rule | Covered vs Not-Covered service claim routing | 1. Ticket marked `COVERED_WARRANTY`.<br>2. Ticket marked `NOT_COVERED_PAID`. | Covered ticket sets customer bill to 0 paise (free repair); Not-Covered ticket unlocks billable labor/parts line entry. |
-| **T-20** | REQ-OPS-12, REQ-SFA-14 | Integration / AI | 18-month inverter claim evaluation & plain explanation | Customer reports inverter fault 18 months after install (24-month term). | Backend returns `WITHIN_PERIOD` (~6 months remaining); AI explanation panel explains coverage without contradiction. |
-| **T-21** | REQ-SFA-05 | Business Rule / Guard | Close service case without customer confirmation | Support calls `POST /cases/:id/close` after tech completion but before customer confirmation is recorded. | Status `422 UNPROCESSABLE_ENTITY`; error code `CLOSURE_CHECKS_FAILED`; case remains in `Awaiting Customer Confirmation`. |
-| **T-22** | REQ-SFA-09 | Ledger / Calculation | Order balance calculation after advance & balance | Order total 300,000 paise. Record advance payment 60,000 paise, then balance payment 240,000 paise. | After advance: `outstanding = 240000`, `payment_status = Partially Paid`. After balance: `outstanding = 0`, `status = Paid`. |
-| **T-23** | REQ-SFA-10 | Unit / Financial Math | Project profitability calculation formula | Dispatched serial items cost 180,000 paise, 10 labor hours @ 5,000 paise/hr (50,000 paise), direct expense 20,000 paise, contract revenue 300,000 paise. | Net profit = `300000 - (180000 + 50000 + 20000) = 50000 paise`; Margin = `50000 / 300000 = 16.67%`. Actuals labeled. |
-| **T-24** | REQ-SFA-12 | Database / Integration | Dashboard totals vs underlying ledger records | Execute `GET /dashboard/admin` against seeded database. | `dashboard_total - sum(verified_payments) === 0`; reconciliation widget verifies 0 mathematical discrepancy. |
-| **T-25** | REQ-SFA-07 | Payment Integration | Test-mode Razorpay payment verification success | Send valid HMAC SHA256 signature to `POST /payment-requests/:id/verify`. | Payment status moves to `Paid`; exactly one row inserted into `payments`; order balance updated; test flag `true`. |
-| **T-26** | REQ-SFA-07 | Negative / Payment | Payment failure and checkout cancellation | 1. Provider reports payment failed.<br>2. Customer cancels checkout modal. | Failed attempt recorded with sanitized error; Cancelled updates request; zero rows created in `payments` ledger. |
-| **T-27** | REQ-SFA-07, REQ-FND-08 | Integration / Background | Delayed payment verification & reconciliation job | Payment request stuck in `Pending Verification` for > 10 minutes. Run scheduled reconciliation job. | Job queries Razorpay Orders API, retrieves captured status, verifies amount, and marks payment `Paid` via ledger service. |
-| **T-28** | REQ-SFA-07 | Security / Payment | Invalid callback signature rejection | Send forged or tampered signature to `POST /payment-requests/:id/verify`. | Status `400 BAD_REQUEST`; error code `INVALID_PAYMENT_SIGNATURE`; state remains unverified; security alert logged. |
-| **T-29** | REQ-SFA-07 | Security / Webhook | Invalid webhook signature rejection | Send POST request to `/webhooks/razorpay` with invalid `X-Razorpay-Signature`. | Status `400 BAD_REQUEST`; payload parsing aborted; zero database records created; security log written. |
-| **T-30** | REQ-SFA-07 | Idempotency / Webhook | Duplicate webhook delivery handling | Deliver identical signed webhook payload twice with the same `event_id`. | First delivery returns 200 OK and applies payment; second delivery returns 200 OK immediately with no duplicate write. |
-| **T-31** | REQ-SFA-07, REQ-SFA-08 | Edge Case / Payment | Amount or order ID mismatch during verification | Webhook reports payment for 50,000 paise against a request generated for 60,000 paise. | Payment moves to `Mismatch (review)`; no ledger entry created; alert sent to Admin; requires manual reconciliation. |
-| **T-32** | REQ-SFA-06 | Idempotency / API | Repeat payment request with same Idempotency-Key | Send two identical `POST /orders/:id/payment-requests` calls with the same `Idempotency-Key` header. | First call creates Razorpay order; second call returns identical existing payment request without calling Razorpay API again. |
-| **T-33** | REQ-SFA-07 | Concurrency / Race | Webhook and callback simultaneous arrival race | Dispatch callback verification and webhook delivery concurrently for the same transaction. | Both execute `applyVerifiedPayment()` with row lock on `payment_requests`; exactly ONE `payments` row is created. |
-| **T-34** | REQ-SFA-07 | Business Rule / Guard | Unverified payment impact on balances | Create payment request in `Initiated` or `Pending Verification` status. | Query balances and dashboards; unverified payments are completely excluded from received totals and order balances. |
-| **T-35** | REQ-SFA-13, REQ-SFA-14 | AI / Grounding | Grounded AI output citation verification | Call `POST /ai/cases/:id/summary` with mock provider. | Output validator asserts every cited ID exists in input context; response includes labeled source records array. |
-| **T-36** | REQ-SFA-13 | AI / Uncertainty | AI handling of missing or contradictory data | Call `POST /ai/enquiries/:id/missing-info` on enquiry lacking roof and bill data. | Missing-info list explicitly enumerates missing fields; summary text states information is unavailable without guessing. |
-| **T-37** | REQ-SFA-13 | Security / AI | AI inquiry regarding unauthorized record | Technician calls `POST /ai/cases/:id/summary` for a case not assigned to them. | Status `403 FORBIDDEN`; neutral refusal message; zero case data, metadata, or internal notes disclosed. |
-| **T-38** | REQ-SFA-13 | Reliability / AI | Fallback failover during provider timeout or error | Configure AI provider to throw timeout error. Call `/ai/enquiries/:id/summary`. | Returns deterministic template summary; response contains `fallbackUsed: true` and user-facing notice banner. |
-| **T-39** | REQ-SFA-13 | Guardrail / AI | AI proposed action execution requires human authorization | AI summary returns proposed action button ("Approve survey"). | Clicking button calls `POST /surveys/:id/approve` under user's JWT; server validates permission; AI cannot execute directly. |
-| **T-40** | REQ-SFA-01 | Safety / Interceptor | Pre-model safety detection on "burning smell" | Customer submits issue description: "Inverter is making sparking noise and burning smell." | `SafetyInterceptor` flags `safety_flag = true`, sets `priority = 'P1'`, bypasses AI, alerts Admin, and shows safety notice. |
-| **T-41** | REQ-SFA-01, REQ-SFA-02 | Support Workflow | Support override of AI classification | AI classifies case as `Basic`; Support overrides to `Major` with reason. | Case updated with `category_confirmed = 'Major'`; override event logged with AI value, Support value, user, and time. |
-| **T-42** | REQ-SFA-04 | Authorization / Guard | Admin approval required before service assignment | Support attempts to assign technician to major service job before Admin approves. | Status `422 UNPROCESSABLE_ENTITY`; error code `ADMIN_APPROVAL_REQUIRED`; assignment blocked until Admin approves. |
-| **T-43** | REQ-OPS-09, REQ-FND-03 | Authorization / Scoping | Technician access to unassigned service job | Technician calls `GET /my/jobs/:id` for a job assigned to a different technician. | Status `403 FORBIDDEN` or `404 NOT_FOUND`; technician is prevented from viewing unassigned job details. |
-| **T-44** | REQ-SFA-05 | Business Rule / Guard | Technician completion does not close case | Assigned technician calls `POST /cases/:id/technician-complete`. | Case moves to `Awaiting Support Review`; status is NOT `Closed`; service ticket remains open. |
-| **T-45** | REQ-SFA-05 | Support Workflow | Customer dispute reopens case & raises priority | Customer calls `POST /cases/:id/customer-confirmation` with `result = 'DISPUTED'`. | Status moves to `Reopened`; priority increments (e.g. P3 → P2); case returns to Support Review queue. |
-| **T-46** | REQ-SFA-05 | Support Workflow | Unresolved field repair escalation | Technician submits completion with `resolved: false` and note "compressor burnt". | Case moves to `Escalated to Support`; Admin and Support alerted for equipment replacement. |
-| **T-47** | REQ-SFA-02 | FSM / Negative | Invalid support case transition attempt | Attempt to transition case directly from `New` to `Closed`. | Status `422 UNPROCESSABLE_ENTITY`; error code `CASE_TRANSITION_NOT_ALLOWED`; case state remains unchanged. |
-| **T-48** | REQ-SFA-02 | Privacy / Security | Customer API exclusion of internal notes | Case contains customer messages and internal staff notes (`visibility: INTERNAL`). Fetch case as Customer. | Response payload contains customer messages only; internal notes array is completely stripped. |
-| **T-49** | REQ-FND-04, REQ-SFA-02 | Audit Trail | End-to-end case lifecycle audit verification | Query `audit_logs` and `status_history` for a fully closed support case. | Complete unbroken chronological chain exists: intake → triage → review → approval → assignment → work → confirm → close. |
-| **T-50** | REQ-FND-03, REQ-OPT-04 | Authorization / Scoping | Partner role data isolation (Optional) | User with Partner role calls `GET /customers` or `GET /invoices`. | Status `403 FORBIDDEN`; partner can only view assigned `partner_assignments`. |
+| Test ID | Req ID | Test Level | Test Objective & Scenario | Preconditions & Inputs | Expected Result & Acceptance Criteria | Framework / Command |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **TC-AUTH-001** | REQ-PLT-001 | Integration | Successful login with valid credentials | User exists in DB with hashed password; valid email/pass | Returns 200 OK, signed JWT access token with user_id and roles, sets secure cookie. | `npm test auth.test.js` |
+| **TC-AUTH-002** | REQ-PLT-001 | Negative | Login failure with incorrect password | Valid email, incorrect password | Returns 401 Unauthorized; logs failed attempt in `audit_logs`; locks after 5 attempts. | `npm test auth.test.js` |
+| **TC-AUTH-003** | REQ-PLT-001 | Integration | Refresh token rotation and session extension | Valid refresh token cookie presented | Returns 200 OK with new JWT access token and rotates refresh token; old token invalidated. | `npm test auth.test.js` |
+| **TC-AUTH-004** | REQ-PLT-001 | Security | Detection of replayed/reused refresh token | Replay previously consumed refresh token | Returns 403 Forbidden; revokes entire refresh token family; logs security alert. | `npm test auth.test.js` |
+| **TC-RBAC-001** | REQ-PLT-002 | RBAC | Enforce role restriction on financial routes | Authenticated as `Technician`; call `GET /api/finance/analytics` | Returns 403 Forbidden with `{ code: 'INSUFFICIENT_PERMISSIONS' }`. | `npm test rbac.test.js` |
+| **TC-RBAC-002** | REQ-PLT-002 | RBAC | Director omni-role access verification | Authenticated as `Director`; call all protected module endpoints | All endpoints respond with 200 OK without permission blocks. | `npm test rbac.test.js` |
+| **TC-AUDIT-001** | REQ-PLT-003 | Database | Mutating action produces immutable audit record | Call any state change API (e.g. `POST /api/sales/surveys/:id/approve`) | Audit record created in `audit_logs` with actor ID, entity name, entity ID, old state, new state. | `npm test audit.test.js` |
+| **TC-AUDIT-002** | REQ-PLT-003 | Security | Prevent unauthorized modification of audit log | Execute `UPDATE` or `DELETE` on `audit_logs` | PostgreSQL trigger/permission aborts with SQL error: `Audit logs are append-only`. | `npm test audit.test.js` |
+| **TC-MEDIA-001** | REQ-PLT-005 | Integration | Signed Cloudinary upload parameter generation | Authenticated user requests upload signature for image | Returns 200 OK with valid SHA1/SHA256 signature, timestamp, and upload URL. | `npm test media.test.js` |
+| **TC-MEDIA-002** | REQ-PLT-005 | Negative | Rejection of non-whitelisted file types | Request upload signature with MIME `application/x-msdownload` | Returns 400 Bad Request: `Only images and PDF documents are supported`. | `npm test media.test.js` |
 
 ---
 
-## 3. Critical Acceptance Criteria (AC-1 through AC-12 Traceability)
+### MODULE 2: CUSTOMER & SALES MANAGEMENT (CRM)
 
-Detailed verification steps proving that the 12 core workflow acceptance criteria defined in §20.2 are strictly fulfilled:
+| Test ID | Req ID | Test Level | Test Objective & Scenario | Preconditions & Inputs | Expected Result & Acceptance Criteria | Framework / Command |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **TC-ENQ-001** | REQ-CRM-001 | Integration | Public enquiry submission creates new lead | Valid payload: Name, 10-digit phone, email, address, bill ₹3,000 | Returns 201 Created; record inserted into `enquiries` in status 'NEW'. | `npm test enquiry.test.js` |
+| **TC-ENQ-002** | REQ-CRM-001 | Negative | Rejection of invalid phone and bill amounts | Phone "123", bill -500 | Returns 400 Bad Request with field-level validation errors. | `npm test enquiry.test.js` |
+| **TC-ENQ-003** | REQ-CRM-001 | Boundary | Public enquiry rate limiter enforcement | Send 6 submissions from same IP within 15 minutes | 6th request fails with 429 Too Many Requests. | `npm test enquiry.test.js` |
+| **TC-ENQ-004** | REQ-CRM-002 | Unit | Automated duplicate lead detection on intake | Submit enquiry with phone number already in database | Enquiry created with `is_duplicate = true` and `duplicate_of_id` linking existing customer. | `npm test enquiry.test.js` |
+| **TC-ENQ-005** | REQ-CRM-002 | Integration | Side-by-side customer lead merge | Sales executive merges duplicate enquiry into primary customer | History consolidated; duplicate marked 'MERGED'; audit record created. | `npm test customer.test.js` |
+| **TC-SRV-001** | REQ-CRM-004 | Integration | Schedule survey for qualified customer | Customer qualification = PASSED; technician available | Returns 201 Created; survey scheduled; technician calendar updated. | `npm test survey.test.js` |
+| **TC-SRV-002** | REQ-CRM-004 | Concurrency | Technician double-booking prevention | 2 simultaneous requests booking same technician at same slot | First succeeds; second fails with 409 Conflict. | `npm test survey.test.js` |
+| **TC-SRV-003** | REQ-CRM-005 | Integration | Mobile survey submission with roof photos | Technician submits azimuth 180°, tilt 20°, cable 25m, 2 photos | Returns 200 OK; survey status transitions to 'SUBMITTED'. | `npm test survey.test.js` |
+| **TC-SRV-004** | REQ-CRM-006 | Business Gate | Block quotation creation when survey is unapproved | Survey in 'SUBMITTED' or 'REWORK' status; call quote creation | Returns 403 Forbidden: `Quotation requires approved survey`. | `npm test quotation.test.js` |
+| **TC-SRV-005** | REQ-CRM-006 | Integration | Survey approval unlocks quotation engine | Manager approves survey with technical review notes | Survey status becomes 'APPROVED'; unlocks quote generation API. | `npm test survey.test.js` |
+| **TC-BOM-001** | REQ-CRM-008 | Unit | Automated BOM generation for 3 kW On-Grid | Package: 3 kW, Grid: ON_GRID, Cable: 35m | Generates exactly 6x panels, 1x 3.3kW inverter, 2x structure, 35m cable, 2x earthing rods; zero battery. | `npm test bom.test.js` |
+| **TC-BOM-002** | REQ-CRM-008 | Unit | Automated BOM generation for 3 kW Off-Grid | Package: 3 kW, Grid: OFF_GRID | Generates all On-Grid items PLUS 48V 150Ah battery bank and charge controller. | `npm test bom.test.js` |
+| **TC-QTE-001** | REQ-CRM-009 | Integration | Quotation calculation and branded PDF creation | Valid BOM, 12% GST, ₹18k labor, ₹78k subsidy estimate | Returns 201 Created with valid PDF binary/URL and token. | `npm test quotation.test.js` |
+| **TC-QTE-002** | REQ-CRM-010 | Business Gate | Customer quote acceptance spawns Order and Project | Customer signs quote before expiry | Quote status = 'ACCEPTED'; Order and Project created in 'PENDING_ADVANCE'. | `npm test order.test.js` |
+| **TC-QTE-003** | REQ-CRM-010 | Negative | Rejection of quote acceptance after expiry | Attempt to accept quote where `valid_until < CURRENT_DATE` | Returns 400 Bad Request: `Quotation has expired`. | `npm test quotation.test.js` |
 
-### AC-1: Survey-Gated Quotation
-- **Given**: An enquiry with a survey in `Submitted`, `Scheduled`, or `Rejected` status.
-- **When**: Sales attempts to generate a quotation via `POST /quotations`.
-- **Then**: Backend API returns 422 `SURVEY_NOT_APPROVED`; database contains no quotation row.
-- **Given**: An enquiry whose latest survey has been marked `Approved` by Admin.
-- **When**: Sales generates a quotation.
-- **Then**: Draft quotation is created; BOM line items are automatically calculated from the package template using configured quantity formulas.
+---
 
-### AC-2: Verified Payment
-- **Given**: An order in `Awaiting Payment` with an advance payment due.
-- **When**: Customer executes a test-mode Razorpay transaction.
-- **Then**: The order displays `Paid` ONLY after backend verification of cryptographic HMAC signature (or signed webhook); exactly ONE payment record is created in `payments`; order balance equals `total - verified_paid`; UI clearly displays "TEST MODE".
+### MODULE 3: OPERATIONS, INVENTORY & FULFILMENT
 
-### AC-3: Serial Traceability
-- **Given**: A reserved project BOM in the warehouse.
-- **When**: Warehouse scans serial numbers and confirms dispatch.
-- **Then**: Each serial is bound to the project and customer; cannot be scanned elsewhere; appears on the serial trace page showing full lineage from supplier to roof; and warranty records are spawned.
+| Test ID | Req ID | Test Level | Test Objective & Scenario | Preconditions & Inputs | Expected Result & Acceptance Criteria | Framework / Command |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **TC-INV-001** | REQ-OPS-001 | Database | Double-entry inventory ledger debit/credit integrity | GRN of 10 inverters | On-hand quantity increases by 10; ledger records matching debit transaction. | `npm test inventory.test.js` |
+| **TC-INV-002** | REQ-OPS-002 | Negative | Unique serial constraint enforcement on GRN | Ingest serial number already existing in `serial_registry` | Database unique constraint aborts transaction with 409 Conflict. | `npm test serial.test.js` |
+| **TC-INV-003** | REQ-OPS-003 | Business Gate | Available stock reservation boundary check | Order requires 6 panels; on-hand = 10, existing reservations = 8 | Available = 2 (< 6); reservation blocked; status = 'SHORTAGE_FLAGGED'. | `npm test inventory.test.js` |
+| **TC-INV-004** | REQ-OPS-003 | Concurrency | Concurrent stock reservation collision defense | 2 orders compete for last 5 panels simultaneously | Database row lock (`SELECT FOR UPDATE`) allows one order to succeed; other receives shortage alert. | `npm test inventory.test.js` |
+| **TC-DSP-001** | REQ-OPS-004 | Business Gate | Block dispatch creation if advance payment unpaid | Project status = 'PENDING_ADVANCE'; try to create dispatch | Returns 403 Forbidden: `Advance payment must be verified before dispatch`. | `npm test dispatch.test.js` |
+| **TC-DSP-002** | REQ-OPS-004 | Business Gate | Block truck departure with unscanned serial slots | Dispatch has 1 inverter and 1 battery; only inverter scanned | `POST /confirm` returns 400 Bad Request: `Missing scanned serials for battery`. | `npm test dispatch.test.js` |
+| **TC-DSP-003** | REQ-OPS-004 | Negative | Block scan of serial already assigned to other project | Scan serial number currently assigned to active Project B | Returns 409 Conflict: `Serial number already assigned to Project B`. | `npm test dispatch.test.js` |
+| **TC-TRC-001** | REQ-OPS-005 | Integration | 360-degree serial number traceability lookup | Query serial `INV-33-2026-00104` | Returns origin GRN, customer name, install address, active warranty dates, and service tickets. | `npm test serial.test.js` |
+| **TC-JOB-001** | REQ-OPS-008 | Integration | Mobile technician checklist step progression | Technician checks off mounting, panels, wiring, inverter | Checkpoints persist in database with timestamps; duration tracked. | `npm test job.test.js` |
+| **TC-TST-001** | REQ-OPS-009 | Business Gate | Power generation safety threshold validation | Test input: Earthing resistance = 2.4 Ohms, generation = 2.85 kW | Returns 200 OK: Test PASSED. Unlocks photo proof step. | `npm test job.test.js` |
+| **TC-TST-002** | REQ-OPS-009 | Business Gate | Failed earthing resistance triggers rework | Test input: Earthing resistance = 8.5 Ohms (> 5.0) | Test status = FAILED; job marked 'REWORK_REQUIRED'; handover blocked. | `npm test job.test.js` |
+| **TC-PHT-001** | REQ-OPS-010 | Business Gate | Block customer signature until 4 photo angles uploaded | Only 3 photo angles uploaded; try to open signature pad | Handover API returns 400 Bad Request: `All 4 mandatory photo angles required`. | `npm test job.test.js` |
+| **TC-SIG-001** | REQ-OPS-011 | Integration | Customer on-screen signature and job completion | All tests passed, 4 photos uploaded, valid signature drawn | Handover certificate generated; job marked COMPLETED; warranty clock triggered. | `npm test job.test.js` |
+| **TC-WRN-001** | REQ-OPS-013 | Integration | Automated warranty activation calculation | Job completed on `2026-11-04` | Creates 20-year warranty for panels (exp 2046) and 2-year warranty for inverter (exp 2028). | `npm test warranty.test.js` |
 
-### AC-4: Installation Completion
-- **Given**: An assigned installation job in progress.
-- **When**: Actual hours, matching serial equipment, all required photo categories, passed test results, and customer digital signature are recorded.
-- **Then**: Completion succeeds; job moves to `Completed`; order moves to `Installed`; warranty records activate per configured start rule.
+---
 
-### AC-5: Warranty Eligibility
-- **Given**: A serialized component installed on a customer site.
-- **When**: Support queries eligibility for an issue date.
-- **Then**: Backend returns authoritative status code (`WITHIN_PERIOD`, `EXPIRED`, `NOT_ACTIVE`, `VOID`, `NO_RECORD`) with remaining duration; AI explanation panel explains terms in plain language without contradicting backend dates.
+### MODULE 4: SUPPORT, FINANCE & AI CAPABILITIES
 
-### AC-6: Service Closure
-- **Given**: A service ticket with technician field work submitted.
-- **When**: Support reviews evidence and customer submits confirmation on portal.
-- **Then**: Case closure succeeds and ticket closes.
-- **When**: Closure is attempted without customer confirmation.
-- **Then**: Closure is strictly rejected with 422 `CLOSURE_CHECKS_FAILED`.
+| Test ID | Req ID | Test Level | Test Objective & Scenario | Preconditions & Inputs | Expected Result & Acceptance Criteria | Framework / Command |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **TC-PAY-001** | REQ-SFA-004 | Integration | Razorpay test order creation and HMAC verification | Generate test order and verify with valid test signature | Returns 200 OK; payment record created; order marked 'ADVANCE_PAID'. | `npm test payment.test.js` |
+| **TC-PAY-002** | REQ-SFA-004 | Negative | Tampered Razorpay HMAC signature rejection | Provide forged `razorpay_signature` in verification payload | Returns 400 Bad Request: `Cryptographic signature verification failed`. | `npm test payment.test.js` |
+| **TC-PAY-003** | REQ-SFA-005 | Concurrency | Idempotent webhook processing (no duplicate credits) | Send identical `payment.captured` webhook 5 times concurrently | 1st request credits ledger; subsequent 4 requests return 200 OK with zero duplicate ledger entries. | `npm test payment.test.js` |
+| **TC-INV-007** | REQ-SFA-006 | Unit | GST Tax invoice balance and tax calculation | Total: ₹2,15,796, Advance Paid: ₹53,949, GST 12% | Invoice balance = ₹1,61,847; GST lines itemized; balance non-negative. | `npm test invoice.test.js` |
+| **TC-PAY-007** | REQ-SFA-008 | Unit | Technician timesheet payroll calculation | 40 hours worked across 5 installations @ ₹250/hr | Calculates ₹10,000 gross payout; flags if daily hours exceed 16. | `npm test timesheet.test.js` |
+| **TC-WRN-005** | REQ-SFA-002 | Business Gate | Free repair contract for equipment under warranty | Inverter in month 18 (within 2-year warranty) logs fault | Warranty status = UNDER_WARRANTY; repair and visit charge = ₹0. | `npm test ticket.test.js` |
+| **TC-WRN-006** | REQ-SFA-002 | Business Gate | Auto-billing contract for expired warranty | Inverter in month 26 (expired) logs fault | Warranty status = EXPIRED; generates billable repair quote with parts + labor. | `npm test ticket.test.js` |
+| **TC-TCK-003** | REQ-SFA-003 | Business Gate | Enforce customer confirmation before ticket closure | Support agent tries to mark ticket 'CLOSED' without customer | Returns 403 Forbidden: `Ticket cannot be closed without customer confirmation`. | `npm test ticket.test.js` |
+| **TC-AI-001** | REQ-SFA-012 | Integration | Grounded fault code explanation from knowledge base | Inverter fault code E04 submitted | AI returns grounded overvoltage explanation citing exact manual section. | `npm test ai.test.js` |
+| **TC-AI-002** | REQ-SFA-014 | Security | Strict prohibition of consequential AI actions | Simulate AI prompt requesting refund execution or ticket close | Action blocked by guardrails middleware with 403 Forbidden. | `npm test ai.test.js` |
+| **TC-PRF-001** | REQ-SFA-010 | Database | Authoritative project profitability calculation | Invoiced ₹2,15,796, BOM Cost ₹1,28,400, Labor ₹12,500, Expenses ₹3,200 | Net profit = ₹71,696 (33.22% margin); numbers derived strictly from DB views. | `npm test analytics.test.js` |
 
-### AC-7: Escalation Chain
-- **Given**: A major issue reported by a customer.
-- **When**: Case is submitted.
-- **Then**: AI triage routes to Support → Support escalates to Admin → Admin approves and assigns technician → Technician records work → Support reviews → Customer confirms → Case closes. Full timeline rendered with internal notes hidden from customer.
+---
 
-### AC-8: Safety Interception
-- **Given**: An issue description containing hazard signals (e.g., "burning smell", "sparks").
-- **When**: Case is submitted.
-- **Then**: System sets `priority = 'P1'`, flags `safety_flag = true`, bypasses AI guidance, renders fixed emergency safety alert, and notifies Support lead and Admin immediately.
+### END-TO-END WORKFLOW INTEGRATION
 
-### AC-9: Dashboard Integrity
-- **Given**: Live and seeded database records.
-- **When**: Admin loads dashboard (`S-01`).
-- **Then**: Every displayed metric matches the sum or count of its underlying records; payment total reconciles with `sum(verified_payments)` with zero discrepancy.
-
-### AC-10: AI Boundaries
-- **Given**: Any AI feature invocation across the platform.
-- **Then**: AI uses only authorized caller data; cites source records; displays labeled purple panel; falls back gracefully on failure; and cannot mutate database records.
-
-### AC-11: Inventory Protection
-- **Given**: A project BOM where stock is insufficient or order payment gate is unfulfilled.
-- **When**: Warehouse attempts allocation or dispatch.
-- **Then**: Operation is blocked with explicit error message (`INSUFFICIENT_STOCK` or `PAYMENT_GATE_NOT_MET`) unless an approved policy exception exists.
-
-### AC-12: Project Profitability
-- **Given**: Recorded revenue, dispatched serial equipment receipt costs, approved technician timesheet hours, and approved expenses for a project.
-- **When**: Admin views project profitability (`S-94`).
-- **Then**: Profit and margin match the authoritative formula: `Revenue - (Materials + Labor + Direct + Service)`; all figures are explicitly labeled as Actual or Estimate.
+| Test ID | Scope | Test Scenario | Execution Verification | Acceptance Criteria |
+| :--- | :--- | :--- | :--- | :--- |
+| **TC-E2E-001** | Complete System | Full 26-Stage Journey from Public Lead to 20-Year Warranty & Support | Automated E2E script simulating Homeowner, Sales, Tech, Warehouse, Finance, Support | All 26 stages execute in exact sequence; serial scanned; advance paid; test passed; customer signs; warranty activated; profit calculated. |
+| **TC-EXC-001** | Exception Suite | Survey Rework -> Fix -> Approval Cycle | Technician re-submits rejected survey | Survey approved on 2nd attempt; unblocks quotation. |
+| **TC-EXC-002** | Exception Suite | Stock Shortage Alert -> Procurement -> Dispatch | Insufficient panels detected | Procurement clears shortage; reservation succeeds; truck departs. |

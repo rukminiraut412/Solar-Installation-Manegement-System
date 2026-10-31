@@ -1,39 +1,62 @@
-export const authenticate = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    // Default demo user context for development if unauthenticated
-    req.user = {
-      id: 'usr-demo-admin-01',
-      role: req.headers['x-role'] || 'Admin',
-      name: 'Rajnandini Admin',
-      email: 'admin@sunpowersolutions.demo'
-    };
-    return next();
-  }
+import { verifyAccessToken } from '../shared/utils/jwt.js';
+import { UnauthorizedError } from '../shared/errors/AppError.js';
+import { db } from '../db/index.js';
 
-  const token = authHeader.split(' ')[1];
-  // Basic token decoding for demo/modular dev
+/**
+ * Authentication middleware
+ * Verifies JWT access token and populates req.user from database
+ */
+export async function authenticate(req, res, next) {
   try {
+    let token = null;
+
+    // 1. Check Authorization Bearer header
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1].trim();
+    } else if (req.cookies && req.cookies.accessToken) {
+      // 2. Check HTTP-only cookie
+      token = req.cookies.accessToken;
+    }
+
+    if (!token) {
+      throw new UnauthorizedError('Authentication required: Missing access token');
+    }
+
+    // 3. Verify JWT
+    const decoded = verifyAccessToken(token);
+    if (!decoded || !decoded.sub) {
+      throw new UnauthorizedError('Invalid or expired access token');
+    }
+
+    // 4. Verify user exists and is active in database
+    const userRes = await db.query(
+      'SELECT id, email, full_name, role, phone, is_active FROM users WHERE id = $1;',
+      [decoded.sub]
+    );
+
+    if (userRes.rows.length === 0) {
+      throw new UnauthorizedError('User account not found');
+    }
+
+    const user = userRes.rows[0];
+
+    if (!user.is_active) {
+      throw new UnauthorizedError('User account is deactivated. Contact administrator.');
+    }
+
+    // Attach sanitized user context to request
     req.user = {
-      id: 'usr-demo-01',
-      role: req.headers['x-role'] || 'Admin',
-      name: 'Staff User',
-      token
+      id: user.id,
+      email: user.email,
+      fullName: user.full_name,
+      role: user.role,
+      phone: user.phone,
+      isActive: user.is_active,
     };
+
     next();
   } catch (err) {
-    return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } });
+    next(err);
   }
-};
-
-export const requireRole = (allowedRoles = []) => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
-    }
-    if (allowedRoles.length && !allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Insufficient role permissions' } });
-    }
-    next();
-  };
-};
+}

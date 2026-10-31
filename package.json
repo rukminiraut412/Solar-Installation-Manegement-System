@@ -2,15 +2,29 @@
   "name": "solar-installation-management-system",
   "version": "1.0.0",
   "private": true,
-  "description": "SunPower Solutions - Solar Installation Management & Intelligence Platform",
+  "description": "Solar Installation Management System - Platform Foundation Monolith",
+  "workspaces": [
+    "server",
+    "client"
+  ],
   "scripts": {
-    "dev:server": "npm --prefix server run dev",
-    "dev:client": "npm --prefix client run dev",
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "build:client": "npm --prefix client run build",
-    "test:server": "npm --prefix server test"
+    "dev": "npm run dev --workspace=server",
+    "dev:client": "npm run dev --workspace=client",
+    "dev:server": "npm run dev --workspace=server",
+    "build": "npm run build --workspace=client",
+    "test": "npm run test --workspaces --if-present",
+    "test:server": "npm run test --workspace=server",
+    "test:client": "npm run test --workspace=client"
   },
-  "devDependencies": {
-    "concurrently": "^9.1.2"
-  }
+  "keywords": [
+    "solar",
+    "management",
+    "crm",
+    "erp",
+    "express",
+    "react",
+    "postgresql"
+  ],
+  "author": "SunPower Solutions Dev Team",
+  "license": "ISC"
 }

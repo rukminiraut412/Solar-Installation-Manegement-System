@@ -7,20 +7,24 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: '#0B0D10',
-        charcoal: '#1A1D23',
-        surface: '#FFFFFF',
-        'gray-soft': '#F7F8FA',
-        'gray-border': '#DDE1E7',
-        'solar-blue': '#1D6FE0',
-        'solar-blue-dark': '#1859B8',
-        success: '#1E8E3E',
-        warning: '#B26A00',
-        danger: '#C5221F',
-        ai: '#5B4BC4',
-        'ai-bg': '#F5F3FF',
-        'ai-border': '#DDD6FE'
-      }
+        solar: {
+          50: '#fffbeb',
+          100: '#fef3c7',
+          200: '#fde68a',
+          300: '#fcd34d',
+          400: '#fbbf24',
+          500: '#f59e0b',
+          600: '#d97706',
+          700: '#b45309',
+          800: '#92400e',
+          900: '#78350f',
+        },
+        navy: {
+          800: '#1e293b',
+          900: '#0f172a',
+          950: '#020617',
+        }
+      },
     },
   },
   plugins: [],
