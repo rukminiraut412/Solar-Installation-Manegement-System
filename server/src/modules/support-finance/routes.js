@@ -2,8 +2,10 @@
  * Support, Finance & AI Router
  * Base Path: /api/v1/support-finance
  * Specification Authority: SOLAR_MANAGEMENT_SYSTEM.md (§16.5, §16.9, §16.10, §17)
+ * Foundation Role Contract: Member 1 ROLES ('Admin/Owner', 'Sales', 'Warehouse', 'Technician', 'Support')
  *
  * Implements strict RBAC route guards using shared requireRole middleware.
+ * Supports both 'Admin' and 'Admin/Owner' roles seamlessly.
  */
 
 import { Router } from 'express';
@@ -11,6 +13,13 @@ import { SupportFinanceController } from './controller.js';
 import { authenticate, requireRole } from '../../middleware/auth.middleware.js';
 
 const router = Router();
+
+// Role groups matching Member 1's Platform Foundation role schema
+const ADMIN_ROLES = ['Admin', 'Admin/Owner'];
+const SUPPORT_ADMIN_ROLES = ['Admin', 'Admin/Owner', 'Support'];
+const FINANCE_ADMIN_ROLES = ['Admin', 'Admin/Owner', 'Finance'];
+const TECH_ADMIN_ROLES = ['Admin', 'Admin/Owner', 'Technician'];
+const CUSTOMER_ADMIN_ROLES = ['Admin', 'Admin/Owner', 'Customer'];
 
 // Health Check
 router.get('/health', (req, res) => {
@@ -31,24 +40,24 @@ router.get('/cases/:id', authenticate, SupportFinanceController.getCaseDetail);
 router.post('/cases/:id/messages', authenticate, SupportFinanceController.addMessage);
 
 // Classification
-router.post('/cases/:id/classification', authenticate, requireRole(['Admin', 'Support']), SupportFinanceController.updateClassification);
-router.patch('/cases/:id/classification', authenticate, requireRole(['Admin', 'Support']), SupportFinanceController.updateClassification);
+router.post('/cases/:id/classification', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.updateClassification);
+router.patch('/cases/:id/classification', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.updateClassification);
 
 // Admin Decision & Technician Assignment
-router.post('/cases/:id/admin-decision', authenticate, requireRole(['Admin']), SupportFinanceController.adminDecision);
-router.post('/cases/:id/assign', authenticate, requireRole(['Admin']), SupportFinanceController.assignTechnician);
+router.post('/cases/:id/admin-decision', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.adminDecision);
+router.post('/cases/:id/assign', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.assignTechnician);
 
 // Technician Field Work Submission
-router.post('/cases/:id/technician-complete', authenticate, requireRole(['Admin', 'Technician']), SupportFinanceController.technicianComplete);
+router.post('/cases/:id/technician-complete', authenticate, requireRole(TECH_ADMIN_ROLES), SupportFinanceController.technicianComplete);
 
 // Support Review
-router.post('/cases/:id/support-review', authenticate, requireRole(['Admin', 'Support']), SupportFinanceController.supportReview);
+router.post('/cases/:id/support-review', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.supportReview);
 
 // Customer Confirmation / Dispute
-router.post('/cases/:id/customer-confirmation', authenticate, requireRole(['Admin', 'Customer']), SupportFinanceController.customerConfirmation);
+router.post('/cases/:id/customer-confirmation', authenticate, requireRole(CUSTOMER_ADMIN_ROLES), SupportFinanceController.customerConfirmation);
 
 // Case Closure Gate
-router.post('/cases/:id/close', authenticate, requireRole(['Admin', 'Support']), SupportFinanceController.closeCase);
+router.post('/cases/:id/close', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.closeCase);
 
 // ====================================================================
 // 2. SERVICE TICKETS & PRE-BILLING WARRANTY CHECK
@@ -59,12 +68,12 @@ router.get('/service-tickets/case/:caseId', authenticate, SupportFinanceControll
 router.get('/warranties/eligibility/:serial', authenticate, SupportFinanceController.checkWarrantyEligibility);
 router.get('/tickets/:id/warranty-lookup', authenticate, SupportFinanceController.checkWarrantyEligibility);
 
-router.post('/service-tickets', authenticate, requireRole(['Admin', 'Support']), SupportFinanceController.createServiceTicket);
-router.patch('/service-tickets/:id/coverage', authenticate, requireRole(['Admin', 'Support']), SupportFinanceController.setCoverageDecision);
-router.patch('/tickets/:id/coverage-decision', authenticate, requireRole(['Admin', 'Support']), SupportFinanceController.setCoverageDecision);
+router.post('/service-tickets', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.createServiceTicket);
+router.patch('/service-tickets/:id/coverage', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.setCoverageDecision);
+router.patch('/tickets/:id/coverage-decision', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.setCoverageDecision);
 
-router.post('/service-tickets/:id/charges', authenticate, requireRole(['Admin', 'Support']), SupportFinanceController.addServiceCharge);
-router.post('/tickets/:id/charges', authenticate, requireRole(['Admin', 'Support']), SupportFinanceController.addServiceCharge);
+router.post('/service-tickets/:id/charges', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.addServiceCharge);
+router.post('/tickets/:id/charges', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.addServiceCharge);
 
 // ====================================================================
 // 3. RAZORPAY TEST PAYMENTS & WEBHOOKS
@@ -84,8 +93,8 @@ router.post('/payments/simulate-webhook', SupportFinanceController.handleWebhook
 router.get('/payments/ledger', authenticate, SupportFinanceController.getPaymentsLedger);
 router.get('/payments', authenticate, SupportFinanceController.getPaymentsLedger);
 
-router.post('/payments/manual', authenticate, requireRole(['Admin', 'Finance']), SupportFinanceController.recordManualPayment);
-router.post('/payments/offline', authenticate, requireRole(['Admin', 'Finance']), SupportFinanceController.recordManualPayment);
+router.post('/payments/manual', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.recordManualPayment);
+router.post('/payments/offline', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.recordManualPayment);
 
 // ====================================================================
 // 4. INVOICES, EXPENSES, TIMESHEETS, SUBSIDY & P/L
@@ -96,11 +105,11 @@ router.get('/finance/invoices', authenticate, SupportFinanceController.listInvoi
 router.get('/expenses', authenticate, SupportFinanceController.listExpenses);
 router.get('/finance/expenses', authenticate, SupportFinanceController.listExpenses);
 
-router.post('/expenses', authenticate, requireRole(['Admin', 'Finance']), SupportFinanceController.createExpense);
-router.post('/finance/expenses', authenticate, requireRole(['Admin', 'Finance']), SupportFinanceController.createExpense);
+router.post('/expenses', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.createExpense);
+router.post('/finance/expenses', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.createExpense);
 
-router.post('/expenses/:id/approve', authenticate, requireRole(['Admin', 'Finance']), SupportFinanceController.approveExpense);
-router.patch('/finance/expenses/:id/review', authenticate, requireRole(['Admin', 'Finance']), SupportFinanceController.approveExpense);
+router.post('/expenses/:id/approve', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.approveExpense);
+router.patch('/finance/expenses/:id/review', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.approveExpense);
 
 router.get('/technician-pay', authenticate, SupportFinanceController.listTechnicianPay);
 router.get('/finance/technician-pay', authenticate, SupportFinanceController.listTechnicianPay);
@@ -108,8 +117,8 @@ router.get('/finance/technician-pay', authenticate, SupportFinanceController.lis
 router.get('/subsidy/:projectId', authenticate, SupportFinanceController.getSubsidyStatus);
 router.get('/finance/subsidies', authenticate, SupportFinanceController.getSubsidyStatus);
 
-router.patch('/subsidy/:projectId', authenticate, requireRole(['Admin', 'Finance']), SupportFinanceController.updateSubsidy);
-router.patch('/finance/subsidies/:projectId/checklist', authenticate, requireRole(['Admin', 'Finance']), SupportFinanceController.updateSubsidy);
+router.patch('/subsidy/:projectId', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.updateSubsidy);
+router.patch('/finance/subsidies/:projectId/checklist', authenticate, requireRole(FINANCE_ADMIN_ROLES), SupportFinanceController.updateSubsidy);
 
 router.get('/profitability/:projectId', authenticate, SupportFinanceController.getProjectProfitability);
 router.get('/finance/project-profitability/:projectId', authenticate, SupportFinanceController.getProjectProfitability);

@@ -42,7 +42,8 @@ export const TicketsService = {
     }
 
     // Goodwill waiver requires Admin authorization (§7.6, §20.1 T-19)
-    if (decision === 'GOODWILL' && approver_role !== 'Admin') {
+    const isAdmin = approver_role === 'Admin' || approver_role === 'Admin/Owner';
+    if (decision === 'GOODWILL' && !isAdmin) {
       const err = new Error('Goodwill free repair on expired/uncovered warranty requires Admin authorization');
       err.code = 'ADMIN_AUTHORIZATION_REQUIRED';
       err.status = 403;

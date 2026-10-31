@@ -559,3 +559,45 @@ test('20. Security: AI Safety Non-Commitment and Mutation Barrier', async () => 
   const explanation = await AIService.explainWarranty({ serialNumber: 'INV-SN-887123' });
   assert.ok(explanation.explanation.includes('final coverage is confirmed upon technical review by Support'));
 });
+
+test('21. Cross-Module RBAC: Member 1 "Admin/Owner" Role Interoperability', async () => {
+  // Test 1: Admin/Owner passes requireRole for Admin endpoints
+  const adminOwnerGuard = requireRole(['Admin', 'Admin/Owner']);
+  const reqAdminOwner = { user: { id: 'usr-admin-owner-01', role: 'Admin/Owner' } };
+  let authorized = false;
+  adminOwnerGuard(reqAdminOwner, {}, () => { authorized = true; });
+  assert.equal(authorized, true, 'Admin/Owner role must be recognized across administrative guards');
+
+  // Test 2: Goodwill waiver authorized by Admin/Owner
+  const ticket = await TicketsService.createTicket({
+    case_id: 'case-test-admin-owner',
+    serial_item_id: 'INV-SN-887123'
+  });
+  const goodwillResult = await TicketsService.setCoverageDecision(ticket.ticket_code, {
+    decision: 'GOODWILL',
+    reason: 'Executive goodwill concession',
+    approver_role: 'Admin/Owner'
+  });
+  assert.equal(goodwillResult.coverage_decision, 'GOODWILL');
+});
+
+test('22. Cross-Module Contract: Operations Warranty Adapter Schema Alignment (docs/contracts/operations.md)', async () => {
+  const result = await WarrantyAdapter.checkEligibility('INV-SN-887123');
+
+  // Verify Member 3 Operations Contract properties (§10.3)
+  assert.ok(result.record, 'Warranty record must be populated');
+  assert.equal(result.status, 'WITHIN_PERIOD');
+  assert.equal(typeof result.remainingDays, 'number');
+  assert.equal(typeof result.remainingMonths, 'number');
+  assert.equal(result.record.serialNumber, 'INV-SN-887123');
+  assert.equal(result.record.productName, 'SunGrow 3.3 kW String Inverter');
+  assert.equal(result.record.durationMonths, 24);
+  assert.ok(result.record.startDate);
+  assert.ok(result.record.endDate);
+  assert.equal(typeof result.isAuthoritativeDB, 'boolean');
+
+  // Verify backwards-compatibility snake_case fields also remain accessible
+  assert.equal(result.record.serial_number, 'INV-SN-887123');
+  assert.equal(result.record.product_name, 'SunGrow 3.3 kW String Inverter');
+  assert.equal(result.record.duration_months, 24);
+});

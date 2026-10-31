@@ -4,7 +4,7 @@
 **Migration Reference:** `server/src/db/migrations/103_support_finance.sql`  
 **Repository Layer:** `server/src/modules/support-finance/repository.js`  
 **Warranty Adapter:** `server/src/modules/support-finance/warranty.adapter.js`  
-**Status:** Partially Ready (Audit Phase 8 Complete — Security Hardened; Awaiting live PostgreSQL credentials from Member 1 and Operations schema merge from Member 3)  
+**Status:** Partially Ready (Phase 9 Cross-Module Integration Verified — Security Hardened & Contract Aligned; Awaiting live PostgreSQL credentials and branch integration from Member 1 and Member 3)  
 **Branch:** `feature/support-finance-ai`
 
 ---
@@ -23,27 +23,32 @@ Member 4 exclusively provides:
 
 ## 2. Exported Harmonized REST API Endpoints & RBAC Guards
 
-All routes mounted under `/api/v1/support-finance`:
+All routes mounted under `/api/v1/support-finance`. Protected with `requireRole` supporting Member 1's Platform Foundation role schema:
+- `ADMIN_ROLES`: `['Admin', 'Admin/Owner']`
+- `SUPPORT_ADMIN_ROLES`: `['Admin', 'Admin/Owner', 'Support']`
+- `FINANCE_ADMIN_ROLES`: `['Admin', 'Admin/Owner', 'Finance']`
+- `TECH_ADMIN_ROLES`: `['Admin', 'Admin/Owner', 'Technician']`
+- `CUSTOMER_ADMIN_ROLES`: `['Admin', 'Admin/Owner', 'Customer']`
 
 ### A. Support Cases & Safety Chain
 - `POST /cases` — Report an issue (authenticated; triggers deterministic safety screen).
 - `GET /cases` — List cases (authenticated; filtered by role; P1 pinned; SLA tracked).
 - `GET /cases/:id` — Case detail (authenticated; customers strictly excluded from seeing `INTERNAL` notes).
 - `POST /cases/:id/messages` — Add customer message or internal team note (authenticated).
-- `POST /cases/:id/classification` & `PATCH /cases/:id/classification` — `requireRole(['Admin', 'Support'])`.
-- `POST /cases/:id/admin-decision` — `requireRole(['Admin'])`.
-- `POST /cases/:id/assign` — `requireRole(['Admin'])`.
-- `POST /cases/:id/technician-complete` — `requireRole(['Admin', 'Technician'])` (technician submits field findings; cannot close case).
-- `POST /cases/:id/support-review` — `requireRole(['Admin', 'Support'])`.
-- `POST /cases/:id/customer-confirmation` — `requireRole(['Admin', 'Customer'])`.
-- `POST /cases/:id/close` — `requireRole(['Admin', 'Support'])` (enforces customer confirmation closure gate).
+- `POST /cases/:id/classification` & `PATCH /cases/:id/classification` — `requireRole(SUPPORT_ADMIN_ROLES)`.
+- `POST /cases/:id/admin-decision` — `requireRole(ADMIN_ROLES)`.
+- `POST /cases/:id/assign` — `requireRole(ADMIN_ROLES)`.
+- `POST /cases/:id/technician-complete` — `requireRole(TECH_ADMIN_ROLES)` (technician submits field findings; cannot close case).
+- `POST /cases/:id/support-review` — `requireRole(SUPPORT_ADMIN_ROLES)`.
+- `POST /cases/:id/customer-confirmation` — `requireRole(CUSTOMER_ADMIN_ROLES)`.
+- `POST /cases/:id/close` — `requireRole(SUPPORT_ADMIN_ROLES)` (enforces customer confirmation closure gate).
 
 ### B. Service Tickets & Warranty-Gated Billing
 - `GET /tickets/by-case/:caseId` & `GET /service-tickets/case/:caseId` — Retrieve ticket and charges for a case.
 - `GET /tickets/:id/warranty-lookup` & `GET /warranties/eligibility/:serial` — Query warranty status via Operations Warranty Adapter.
-- `POST /service-tickets` — `requireRole(['Admin', 'Support'])`.
-- `PATCH /service-tickets/:id/coverage` & `PATCH /tickets/:id/coverage-decision` — `requireRole(['Admin', 'Support'])`.
-- `POST /service-tickets/:id/charges` & `POST /tickets/:id/charges` — `requireRole(['Admin', 'Support'])` (**422 BLOCKED** while coverage is `PENDING`).
+- `POST /service-tickets` — `requireRole(SUPPORT_ADMIN_ROLES)`.
+- `PATCH /service-tickets/:id/coverage` & `PATCH /tickets/:id/coverage-decision` — `requireRole(SUPPORT_ADMIN_ROLES)`.
+- `POST /service-tickets/:id/charges` & `POST /tickets/:id/charges` — `requireRole(SUPPORT_ADMIN_ROLES)` (**422 BLOCKED** while coverage is `PENDING`).
 
 ### C. Razorpay Test Payments & Webhooks
 - `GET /payments/requests` — List active payment requests.
@@ -51,16 +56,16 @@ All routes mounted under `/api/v1/support-finance`:
 - `POST /payments/verify-signature` & `POST /payments/verify` — Cryptographic HMAC-SHA256 timing-safe verification of checkout callback.
 - `POST /payments/webhook` & `POST /payments/simulate-webhook` — Webhook handler verifying HMAC on raw request body buffer (no test bypass in production).
 - `GET /payments/ledger` & `GET /payments` — Verified payments ledger.
-- `POST /payments/manual` & `POST /payments/offline` — `requireRole(['Admin', 'Finance'])` (mandatory reference and proof file).
+- `POST /payments/manual` & `POST /payments/offline` — `requireRole(FINANCE_ADMIN_ROLES)` (mandatory reference and proof file).
 
 ### D. Finance, Invoices & Profitability
 - `GET /invoices` & `GET /finance/invoices` — List invoices and outstanding balances (flags negative balances as overpaid).
 - `GET /expenses` & `GET /finance/expenses` — List direct project expenses.
-- `POST /expenses` & `POST /finance/expenses` — `requireRole(['Admin', 'Finance'])`.
-- `POST /expenses/:id/approve` & `PATCH /finance/expenses/:id/review` — `requireRole(['Admin', 'Finance'])`.
+- `POST /expenses` & `POST /finance/expenses` — `requireRole(FINANCE_ADMIN_ROLES)`.
+- `POST /expenses/:id/approve` & `PATCH /finance/expenses/:id/review` — `requireRole(FINANCE_ADMIN_ROLES)`.
 - `GET /technician-pay` & `GET /finance/technician-pay` — View approved technician timesheet pay records.
 - `GET /subsidy/:projectId` & `GET /finance/subsidies` — Subsidy application document status.
-- `PATCH /subsidy/:projectId` & `PATCH /finance/subsidies/:projectId/checklist` — `requireRole(['Admin', 'Finance'])`.
+- `PATCH /subsidy/:projectId` & `PATCH /finance/subsidies/:projectId/checklist` — `requireRole(FINANCE_ADMIN_ROLES)`.
 - `GET /profitability/:projectId` & `GET /finance/project-profitability/:projectId` — Project-wise P/L breakdown with actual vs estimate labels.
 
 ### E. Dashboards & Analytics
@@ -76,42 +81,52 @@ All routes mounted under `/api/v1/support-finance`:
 
 ---
 
-## 3. Security Hardening & Audit Verification (Phase 8)
+## 3. Cross-Module Integration Verification (Phase 9 Audit)
 
-### A. PostgreSQL Persistence & Production Fail-Fast
-- **100% Parameterized Queries:** Every database access in `repository.js` utilizes parameterized SQL ($1, $2, ...).
-- **SQL Injection Prevention:** Dynamic updates in `updateCase` are protected by a strict column name allowlist (`ALLOWED_CASE_COLUMNS`).
-- **Production Mode Fail-Fast:** In production mode (`NODE_ENV === 'production'`), silent fallback to in-memory fixtures is strictly blocked. If PostgreSQL fails or is unreachable, write and read operations fail loudly with a 500 `DATABASE_PERSISTENCE_ERROR`.
-- **Transactions & Rollback:** Multi-step ledger recordings execute `BEGIN ... COMMIT` with explicit `ROLLBACK` on failure and guaranteed client release in `finally`.
-- **Persistence Verification Status:** Code-level parameterized SQL and error handling are fully audited. Live database verification remains pending valid database credentials from Member 1.
+### A. Member 1 (Platform Foundation) — Authentication & JWT
+1. **Inspection of `origin/main`:**
+   - Member 1 merged `feature/platform-foundation` with real JWT verification in `server/src/middleware/auth.middleware.js` and `server/src/shared/utils/jwt.js`.
+   - Access tokens are signed using `jwt.sign({ sub, email, role, type: 'access' }, env.JWT_SECRET)`.
+   - Incoming requests are decoded via `verifyAccessToken(token)`.
+   - Tokens must correspond to an active database row in `users` (`SELECT id, email, full_name, role, phone, is_active FROM users WHERE id = $1;`).
+2. **Rejection of Unauthenticated Requests:**
+   - Missing or invalid tokens throw `UnauthorizedError('Authentication required: Missing access token')`.
+3. **Role Authorization Integrity:**
+   - Client headers `x-role` and `x-user-role` are ignored in production mode.
+   - User identity and role derive exclusively from verified JWT and database user state (`req.user`).
+4. **Role Schema Harmonization:**
+   - Member 1 defined `ROLES.ADMIN = 'Admin/Owner'`.
+   - Member 4 RBAC route guards (`routes.js`) have been upgraded to accept `Admin/Owner` across all administrative endpoints.
+5. **Identified Blockers / Gaps:**
+   - **Finance Role:** Member 1's role enum (`Admin/Owner`, `Sales`, `Warehouse`, `Technician`, `Support`) lacks a dedicated `Finance` role; Member 4 maps Finance privileges to `Admin/Owner` for parity.
+   - **Customer Portal Authentication:** Member 1's internal `users` table currently does not model portal customer logins. Customer case interactions require an authentication strategy or customer user mapping upon final merge.
 
-### B. Authentication & RBAC Hardening
-- **Route-Level Permission Guards:** Applied Member 1's `requireRole(...)` middleware across administrative and finance routes.
-- **Client Header Deprecation:** In production mode, client-supplied headers `x-role` and `x-user-role` are completely ignored; user context is extracted strictly from the authenticated session (`req.user`).
-- **Customer Confidentiality Gate:** `CasesService.getCaseDetail` strictly excludes `INTERNAL` staff notes from Customer queries.
+### B. Member 3 (Operations) — Warranty Contract & Table Mismatch
+1. **Investigation of `serial_registry` vs `serial_items` Mismatch:**
+   - In early planning documents (`development-phases.md`, `requirement-inventory.md`), the serialized inventory table was referred to as `serial_registry`.
+   - In `001_foundation.sql`, the physical table was created as `serial_items` (`id`, `product_id`, `serial_number`, `status`, `unit_cost_paise`, `project_id`, `customer_id`).
+   - In `docs/contracts/operations.md` (§15.3, §17), Member 3 confirmed `serial_items` as the primary table and defined a compatibility view: `CREATE OR REPLACE VIEW serial_registry AS SELECT * FROM serial_items;`.
+2. **Adapter Dual-Resilience:**
+   - Member 4's `warranty.adapter.js` queries `serial_items` as primary and falls back to `serial_registry` if `serial_items` is not yet migrated.
+   - Normalizes all response fields matching Member 3's `GET /api/v1/operations/warranties/:serialNumber` contract: `serialNumber`, `warrantyCode`, `productName`, `productId`, `customerId`, `projectId`, `status`, `durationMonths`, `startDate`, `endDate`, `remainingDays`, `remainingMonths`, `isAuthoritativeDB`.
+3. **No Silent Mock Fallback:**
+   - If Operations database tables are unreachable in production, `checkEligibility` returns `{ status: 'UNAVAILABLE', isAuthoritativeDB: false }` and never grants false warranty coverage.
 
-### C. Payment Security & Tamper Protection
-- **Server Authority:** The payment amount is strictly computed by backend logic from verified invoice totals and prior payments; client cannot submit an arbitrary amount.
-- **Constant-Time Verification:** Signatures are compared using `crypto.timingSafeEqual` on UTF-8 buffers to prevent timing side-channel attacks.
-- **Webhook Security:** Webhook endpoint strictly requires `x-razorpay-signature` and validates HMAC SHA256 against raw request body bytes.
-- **Test Bypass Prohibition:** Simulated mock signatures (`simulated_hmac_sha256_valid`, `valid_test_sig_`) are strictly rejected in production mode.
-- **Idempotency:** Webhook events check provider event ID deduplication. Verified callback signatures check if request is already marked `Paid` to prevent duplicate ledger transactions.
+### C. PostgreSQL Persistence Status
+- **Parameterization:** 100% of queries use `$1, $2, ...` parameterized placeholders.
+- **Fail-Fast Policy:** In production mode (`NODE_ENV === 'production'`), any query error or failure throws a 500 `DATABASE_PERSISTENCE_ERROR`. Silent in-memory store fallback is prohibited.
+- **Live Connection Status:** **UNVERIFIED (LIVE DB OFFLINE / ACCESS DENIED)**. Environment credentials in `server/src/config/env.js` fail with `password authentication failed for user "postgres"`. No fake credentials were created.
+- **Test Separation:** Mocked/isolated tests pass cleanly (22/22 tests). Production fail-fast is validated via dedicated rejection tests.
 
-### D. Warranty Integration & Operations Dependency
-- **Isolated Adapter:** `warranty.adapter.js` mediates interaction with Operations tables (`warranty_records` JOIN `serial_items` JOIN `products`).
-- **Unavailable Status Handling:** If Operations database records are missing or offline in production mode, the adapter returns `UNAVAILABLE` and never silently defaults to confirmed coverage.
-- **Pre-Billing Guard:** Adding service charges remains strictly gated by `coverage_decision !== 'PENDING'`.
-
-### E. AI Safety Guardrails
-- **Mutation Barrier:** AI service exposes zero mutation capabilities (cannot approve payments, modify stock, set warranty coverage, or close cases).
-- **Emergency Safety Interceptor:** Pre-model screening detects fire, smoke, and shock hazard patterns, immediately pinning priority to P1, returning emergency safety guidance, and bypassing AI generative routing.
-- **Dual-Panel Transparency:** AI warranty responses present authoritative system results alongside plain-language explanations and explicitly disclose that final coverage requires human technical staff review.
+### D. Route Integration & Central Mounting
+- Member 4 router is mounted at `/api/v1/support-finance` in `server/src/app.js`.
+- All routes export cleanly and verify against role checks.
 
 ---
 
-## 4. Verification & Testing
+## 4. Test & Build Status
 
-- **Backend Test Suite:** 20 passing automated tests in `server/src/modules/support-finance/support-finance.test.js`.
-  - Sections include Safety Interceptor, Case FSM, Pre-Billing Warranty Guard, 7-Stage Chain, Customer Dispute, Notes Scoping, Razorpay HMAC, Webhook Idempotency, Reconciliation, Profitability, AI Grounding, Database Probe, Warranty Adapter, Route Harmonization, Production Fail-Fast, Production Warranty Fallback Prohibited, Payment Tampering Rejection, Webhook Signature Requirement, RBAC Middleware Guards, and AI Safety Mutation Barriers.
-- **Frontend Build Status:** Succeeded (`npm run build` compiled 2217 modules with 0 errors).
-- **Integration Readiness Status:** **PARTIALLY READY**. Member 4 code is internally audited and security hardened. Full live production readiness requires Member 1's live PostgreSQL credentials, real JWT issuer, and Member 3's Operations schema tables.
+- **Automated Backend Tests:** **22 passing tests** (0 failed, 0 skipped, 100% pass rate in `server/src/modules/support-finance/support-finance.test.js`).
+  - Covers Safety Interceptor, Case FSM, Pre-Billing Warranty Guard, 7-Stage Chain, Customer Dispute, Notes Scoping, Razorpay HMAC, Webhook Idempotency, Reconciliation, Profitability, AI Grounding, Database Probe, Warranty Adapter, Route Harmonization, Production Fail-Fast, Production Warranty Fallback Prohibited, Payment Tampering Rejection, Webhook Signature Requirement, RBAC Middleware Guards, AI Safety Mutation Barriers, Member 1 "Admin/Owner" Role Interoperability, and Operations Contract Schema Alignment.
+- **Frontend Production Build:** Succeeded (`npm run build` in `client/` compiled 2217 modules in 7.33s with 0 errors).
+- **Module Status:** **PARTIALLY READY** pending final live PostgreSQL database credentials, JWT integration from Member 1, and Operations table seeding from Member 3.

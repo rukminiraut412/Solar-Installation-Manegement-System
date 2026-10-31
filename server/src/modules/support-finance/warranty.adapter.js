@@ -1,15 +1,18 @@
 /**
  * Operations Module Warranty Adapter
  * Specification Authority: SOLAR_MANAGEMENT_SYSTEM.md (§7.5, §7.6, §20.1 T-19)
+ * Operations Contract Authority: docs/contracts/operations.md (§10.3, §15.3, §17)
  * 
- * Provides an isolated interface between Member 4 (Support & Finance)
+ * Provides an isolated, dual-resilient interface between Member 4 (Support & Finance)
  * and Member 3 (Operations - Warranty & Serialized Stock).
  * 
- * Target Contract (Member 3 - Operations):
- * Database Table: `warranty_records` JOIN `serial_items` JOIN `products`
- * Columns: id, serial_number, product_name, duration_months, start_date, end_date, status, party, scope
+ * Contract Alignment:
+ * - Direct SQL Query: `warranty_records` JOIN `serial_items` JOIN `products`
+ *   (with fallback to `serial_registry` view if present).
+ * - Standard REST Endpoint: `GET /api/v1/operations/warranties/:serialNumber`
+ * - Standard Response Envelope: Returns normalized status ('WITHIN_PERIOD', 'EXPIRED', 'VOID', 'NOT_ACTIVE')
+ *   with dual camelCase and snake_case field access.
  * 
- * Current Status: PENDING MEMBER 3 OPERATIONS MODULE LIVE MERGE
  * Never silently treats unavailable or offline warranty data as confirmed coverage.
  */
 
@@ -23,8 +26,8 @@ export const WarrantyAdapter = {
   isOperationsModuleMerged: false,
 
   /**
-   * Look up warranty status for a component by serial number
-   * Queries PostgreSQL `warranty_records` if database is connected;
+   * Look up warranty status for a component by serial number.
+   * Queries PostgreSQL `warranty_records` (via `serial_items` or `serial_registry`).
    * In production mode, never silently falls back to in-memory fixtures.
    */
   async checkEligibility(serialNumber, claimDate = new Date().toISOString().split('T')[0]) {
@@ -39,8 +42,8 @@ export const WarrantyAdapter = {
       };
     }
 
-    // Attempt live PostgreSQL query matching 001_foundation.sql / Member 3 contract
-    const sql = `
+    // 1. Primary Query: Matching 001_foundation.sql & docs/contracts/operations.md §15.3
+    const primarySql = `
       SELECT 
         w.id AS warranty_id,
         w.warranty_code,
@@ -60,13 +63,42 @@ export const WarrantyAdapter = {
     `;
 
     try {
-      const res = await query(sql, [cleanSerial]);
+      const res = await query(primarySql, [cleanSerial]);
       if (res && res.rows && res.rows.length > 0) {
-        const row = res.rows[0];
-        return this._evaluateDates(row, claimDate, true);
+        return this._evaluateDates(res.rows[0], claimDate, true);
       }
     } catch (err) {
-      console.warn(`[WARRANTY-ADAPTER-NOTICE] Operations SQL query: ${err.message}`);
+      // 2. Secondary Query: If serial_items is named serial_registry in transitional schemas
+      if (err.message && err.message.includes('serial_items')) {
+        const fallbackViewSql = `
+          SELECT 
+            w.id AS warranty_id,
+            w.warranty_code,
+            w.duration_months,
+            w.start_date,
+            w.end_date,
+            w.status AS warranty_status,
+            w.party,
+            w.scope,
+            s.serial_number,
+            p.name AS product_name
+          FROM warranty_records w
+          JOIN serial_registry s ON (w.serial_item_id = s.id)
+          JOIN products p ON s.product_id = p.id
+          WHERE LOWER(s.serial_number) = LOWER($1)
+          LIMIT 1;
+        `;
+        try {
+          const resView = await query(fallbackViewSql, [cleanSerial]);
+          if (resView && resView.rows && resView.rows.length > 0) {
+            return this._evaluateDates(resView.rows[0], claimDate, true);
+          }
+        } catch (viewErr) {
+          console.warn(`[WARRANTY-ADAPTER-NOTICE] Operations view query fallback: ${viewErr.message}`);
+        }
+      } else {
+        console.warn(`[WARRANTY-ADAPTER-NOTICE] Operations SQL query: ${err.message}`);
+      }
     }
 
     // In production mode, if the database did not yield an authoritative record,
@@ -94,8 +126,38 @@ export const WarrantyAdapter = {
     };
   },
 
-  _evaluateDates(record, claimDate, isDB = false) {
-    if (record.status === 'Void' || record.warranty_status === 'Void') {
+  _evaluateDates(rawRecord, claimDate, isDB = false) {
+    const startDateStr = rawRecord.start_date || rawRecord.startDate;
+    const endDateStr = rawRecord.end_date || rawRecord.endDate;
+    const durationMonths = Number(rawRecord.duration_months || rawRecord.durationMonths || 24);
+    const productName = rawRecord.product_name || rawRecord.productName || 'Solar Equipment';
+    const warrantyCode = rawRecord.warranty_code || rawRecord.warrantyCode || 'WRN-UNKNOWN';
+    const serialNumber = rawRecord.serial_number || rawRecord.serialNumber;
+    const party = rawRecord.party || 'MANUFACTURER';
+    const scope = rawRecord.scope || 'PARTS';
+
+    // Normalized envelope supporting both camelCase (Member 3 REST contract) and snake_case
+    const record = {
+      ...rawRecord,
+      id: rawRecord.warranty_id || rawRecord.id,
+      serial_number: serialNumber,
+      serialNumber,
+      warranty_code: warrantyCode,
+      warrantyCode,
+      product_name: productName,
+      productName,
+      duration_months: durationMonths,
+      durationMonths,
+      start_date: startDateStr,
+      startDate: startDateStr,
+      end_date: endDateStr,
+      endDate: endDateStr,
+      party,
+      scope,
+      isAuthoritativeDB: isDB
+    };
+
+    if (rawRecord.status === 'Void' || rawRecord.warranty_status === 'Void') {
       return {
         status: 'VOID',
         message: 'Warranty voided by administration.',
@@ -104,8 +166,8 @@ export const WarrantyAdapter = {
       };
     }
 
-    const startDate = new Date(record.start_date);
-    const endDate = new Date(record.end_date);
+    const startDate = new Date(startDateStr);
+    const endDate = new Date(endDateStr);
     const checkDate = new Date(claimDate);
 
     if (checkDate < startDate) {
@@ -121,23 +183,23 @@ export const WarrantyAdapter = {
       const expiredDays = Math.floor((checkDate - endDate) / 86400000);
       return {
         status: 'EXPIRED',
-        message: `Warranty expired on ${record.end_date} (~${expiredDays} days ago). Paid service card applies.`,
+        message: `Warranty expired on ${endDateStr} (~${expiredDays} days ago). Paid service card applies.`,
         record,
         expiredDays,
         isAuthoritativeDB: isDB
       };
     }
 
-    // Active
+    // Active within period
     const remainingDays = Math.floor((endDate - checkDate) / 86400000);
-    const remainingMonths = (remainingDays / 30.4).toFixed(1);
+    const remainingMonths = Number((remainingDays / 30.4).toFixed(1));
 
     return {
       status: 'WITHIN_PERIOD',
       message: `Warranty active: ~${remainingMonths} months (${remainingDays} days) remaining.`,
       record,
       remainingDays,
-      remainingMonths: Number(remainingMonths),
+      remainingMonths,
       isAuthoritativeDB: isDB
     };
   }
