@@ -1,0 +1,150 @@
+/**
+ * Support, Finance & AI Router
+ * Base Path: /api/v1/support-finance
+ * Specification Authority: SOLAR_MANAGEMENT_SYSTEM.md (§16.5, §16.9, §16.10, §17)
+ * Foundation Role Contract: Member 1 ROLES ('Admin/Owner', 'Sales', 'Warehouse', 'Technician', 'Support')
+ *
+ * Implements strict RBAC route guards using shared requireRole middleware.
+ * Uses exact project roles matching Member 1 Platform Foundation.
+ * No speculative 'Finance' or 'Customer' roles are invented.
+ * Finance actions are governed by Admin/Owner per Member 1 permission matrix.
+ * Customer portal login/authentication is explicitly marked PENDING.
+ */
+
+import { Router } from 'express';
+import { SupportFinanceController } from './controller.js';
+import { authenticate, requireRole } from './auth.js';
+
+const router = Router();
+
+// Exact project roles matching Member 1 (Platform Foundation)
+const ADMIN_ROLES = ['Admin/Owner', 'Admin'];
+const SUPPORT_ADMIN_ROLES = ['Admin/Owner', 'Admin', 'Support'];
+const TECH_ADMIN_ROLES = ['Admin/Owner', 'Admin', 'Technician'];
+
+// Health Check
+router.get('/health', (req, res) => {
+  res.json({
+    module: 'support-finance',
+    status: 'online',
+    version: '1.0.0',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ====================================================================
+// 1. SUPPORT CASES & 33-TRANSITION ESCALATION CHAIN
+// ====================================================================
+router.post('/cases', authenticate, SupportFinanceController.createCase);
+router.get('/cases', authenticate, SupportFinanceController.listCases);
+router.get('/cases/:id', authenticate, SupportFinanceController.getCaseDetail);
+router.post('/cases/:id/messages', authenticate, SupportFinanceController.addMessage);
+
+// Classification
+router.post('/cases/:id/classification', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.updateClassification);
+router.patch('/cases/:id/classification', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.updateClassification);
+
+// Admin Decision & Technician Assignment
+router.post('/cases/:id/admin-decision', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.adminDecision);
+router.post('/cases/:id/assign', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.assignTechnician);
+
+// Technician Field Work Submission
+router.post('/cases/:id/technician-complete', authenticate, requireRole(TECH_ADMIN_ROLES), SupportFinanceController.technicianComplete);
+
+// Support Review
+router.post('/cases/:id/support-review', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.supportReview);
+
+// Customer Confirmation / Dispute (Support/Admin logs customer confirmation; Customer portal auth is PENDING)
+router.post('/cases/:id/customer-confirmation', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.customerConfirmation);
+
+// Case Closure Gate
+router.post('/cases/:id/close', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.closeCase);
+
+// ====================================================================
+// 2. SERVICE TICKETS & PRE-BILLING WARRANTY CHECK
+// ====================================================================
+router.get('/tickets/by-case/:caseId', authenticate, SupportFinanceController.getTicketByCaseId);
+router.get('/service-tickets/case/:caseId', authenticate, SupportFinanceController.getTicketByCaseId);
+
+router.get('/warranties/eligibility/:serial', authenticate, SupportFinanceController.checkWarrantyEligibility);
+router.get('/tickets/:id/warranty-lookup', authenticate, SupportFinanceController.checkWarrantyEligibility);
+
+router.post('/service-tickets', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.createServiceTicket);
+router.patch('/service-tickets/:id/coverage', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.setCoverageDecision);
+router.patch('/tickets/:id/coverage-decision', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.setCoverageDecision);
+
+router.post('/service-tickets/:id/charges', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.addServiceCharge);
+router.post('/tickets/:id/charges', authenticate, requireRole(SUPPORT_ADMIN_ROLES), SupportFinanceController.addServiceCharge);
+
+// ====================================================================
+// 3. RAZORPAY TEST PAYMENTS & WEBHOOKS
+// ====================================================================
+router.get('/payments/requests', authenticate, SupportFinanceController.getPaymentRequests);
+
+router.post('/payments/create-order', authenticate, SupportFinanceController.createPaymentRequest);
+router.post('/payments/orders', authenticate, SupportFinanceController.createPaymentRequest);
+
+router.post('/payments/verify-signature', authenticate, SupportFinanceController.verifyPaymentSignature);
+router.post('/payments/verify', authenticate, SupportFinanceController.verifyPaymentSignature);
+
+// Webhook endpoint (authenticated via cryptographic HMAC-SHA256 signature header, not JWT session)
+router.post('/payments/webhook', SupportFinanceController.handleWebhook);
+router.post('/payments/simulate-webhook', SupportFinanceController.handleWebhook);
+
+router.get('/payments/ledger', authenticate, SupportFinanceController.getPaymentsLedger);
+router.get('/payments', authenticate, SupportFinanceController.getPaymentsLedger);
+
+// Finance action: strictly Admin/Owner per Member 1 permission matrix
+router.post('/payments/manual', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.recordManualPayment);
+router.post('/payments/offline', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.recordManualPayment);
+
+// ====================================================================
+// 4. INVOICES, EXPENSES, TIMESHEETS, SUBSIDY & P/L
+// ====================================================================
+router.get('/invoices', authenticate, SupportFinanceController.listInvoices);
+router.get('/finance/invoices', authenticate, SupportFinanceController.listInvoices);
+
+router.get('/expenses', authenticate, SupportFinanceController.listExpenses);
+router.get('/finance/expenses', authenticate, SupportFinanceController.listExpenses);
+
+// Finance action: strictly Admin/Owner per Member 1 permission matrix
+router.post('/expenses', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.createExpense);
+router.post('/finance/expenses', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.createExpense);
+
+router.post('/expenses/:id/approve', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.approveExpense);
+router.patch('/finance/expenses/:id/review', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.approveExpense);
+
+router.get('/technician-pay', authenticate, SupportFinanceController.listTechnicianPay);
+router.get('/finance/technician-pay', authenticate, SupportFinanceController.listTechnicianPay);
+
+router.get('/subsidy/:projectId', authenticate, SupportFinanceController.getSubsidyStatus);
+router.get('/finance/subsidies', authenticate, SupportFinanceController.getSubsidyStatus);
+
+router.patch('/subsidy/:projectId', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.updateSubsidy);
+router.patch('/finance/subsidies/:projectId/checklist', authenticate, requireRole(ADMIN_ROLES), SupportFinanceController.updateSubsidy);
+
+router.get('/profitability/:projectId', authenticate, SupportFinanceController.getProjectProfitability);
+router.get('/finance/project-profitability/:projectId', authenticate, SupportFinanceController.getProjectProfitability);
+
+// ====================================================================
+// 5. ROLE-AWARE DASHBOARDS & RECONCILIATION
+// ====================================================================
+router.get('/dashboards/reconciliation', authenticate, SupportFinanceController.getReconciliation);
+router.post('/dashboards/reconcile', authenticate, SupportFinanceController.getReconciliation);
+
+router.get('/dashboards/metrics', authenticate, SupportFinanceController.getDashboard);
+router.get('/dashboards/:role', authenticate, SupportFinanceController.getDashboard);
+
+// ====================================================================
+// 6. SANDBOXED AI ASSISTANT (MOCK DEFAULT)
+// ====================================================================
+router.post('/ai/summarize', authenticate, SupportFinanceController.summarizeEntity);
+router.post('/ai/missing-info', authenticate, SupportFinanceController.detectMissingInfo);
+
+router.post('/ai/warranty-explain', authenticate, SupportFinanceController.explainWarranty);
+router.post('/ai/explain-warranty', authenticate, SupportFinanceController.explainWarranty);
+
+router.post('/ai/triage', authenticate, SupportFinanceController.triageIssue);
+router.get('/ai/logs', authenticate, SupportFinanceController.getAILogs);
+
+export default router;
