@@ -201,6 +201,20 @@ for (const prod of mockStore.products) {
   });
 }
 
+const originalInvGet = mockStore.inventory.get.bind(mockStore.inventory);
+mockStore.inventory.get = function (key) {
+  if (!key) return undefined;
+  const direct = originalInvGet(key);
+  if (direct) return direct;
+  for (const item of this.values()) {
+    if (item.productId === key || (item.sku && String(item.sku).toUpperCase() === String(key).toUpperCase())) {
+      this.set(key, item);
+      return item;
+    }
+  }
+  return undefined;
+};
+
 // Seed initial serialized items
 mockStore.serialItems.set('INV-GROW-3K-26-00101', {
   id: 'ser-001',

@@ -6,6 +6,7 @@
 
 import { Router } from 'express';
 import { OperationsController } from './operations.controller.js';
+import { WarehouseQuotationController } from './warehouse-quotation.controller.js';
 import { operationsAuthenticate } from './operations.auth.js';
 import { authorize } from '../../middleware/rbac.middleware.js';
 import { ROLES } from '../../shared/constants/roles.js';
@@ -15,9 +16,24 @@ const router = Router();
 // ==========================================
 // Phase 1: Products & Inventory Catalog
 // ==========================================
-router.get('/products', operationsAuthenticate, OperationsController.getProducts);
-router.get('/products/categories', operationsAuthenticate, OperationsController.getCategories);
-router.get('/products/:id', operationsAuthenticate, OperationsController.getProductById);
+router.get(
+  '/products',
+  operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE, ROLES.TECHNICIAN, ROLES.SALES),
+  OperationsController.getProducts
+);
+router.get(
+  '/products/categories',
+  operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE, ROLES.TECHNICIAN, ROLES.SALES),
+  OperationsController.getCategories
+);
+router.get(
+  '/products/:id',
+  operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE, ROLES.TECHNICIAN, ROLES.SALES),
+  OperationsController.getProductById
+);
 router.post(
   '/products',
   operationsAuthenticate,
@@ -28,7 +44,7 @@ router.post(
 router.get(
   '/inventory',
   operationsAuthenticate,
-  authorize(ROLES.ADMIN, ROLES.WAREHOUSE, ROLES.TECHNICIAN, ROLES.SALES),
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE),
   OperationsController.getInventorySummary
 );
 router.get(
@@ -53,24 +69,24 @@ router.post(
 // ==========================================
 // Phase 2: Stock Reservations & Shortages
 // ==========================================
-// Handover from Member 2
 router.post(
   '/projects/handover',
   operationsAuthenticate,
-  authorize(ROLES.ADMIN, ROLES.SALES, ROLES.WAREHOUSE),
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE, ROLES.SALES),
   OperationsController.ingestProjectBom
 );
 
 router.get(
   '/projects/:projectId/bom',
   operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE, ROLES.TECHNICIAN),
   OperationsController.getProjectBom
 );
 
 router.post(
   '/projects/:projectId/reserve-stock',
   operationsAuthenticate,
-  authorize(ROLES.ADMIN, ROLES.WAREHOUSE, ROLES.SALES),
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE),
   OperationsController.reserveStock
 );
 
@@ -84,7 +100,7 @@ router.post(
 router.get(
   '/shortages',
   operationsAuthenticate,
-  authorize(ROLES.ADMIN, ROLES.WAREHOUSE, ROLES.SALES),
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE),
   OperationsController.getShortagesSummary
 );
 
@@ -100,12 +116,13 @@ router.post(
 router.get(
   '/serials',
   operationsAuthenticate,
-  authorize(ROLES.ADMIN, ROLES.WAREHOUSE, ROLES.TECHNICIAN),
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE),
   OperationsController.listSerials
 );
 router.get(
   '/serials/:serialNumber/trace',
   operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE, ROLES.TECHNICIAN),
   OperationsController.getSerialTraceability
 );
 router.post(
@@ -151,6 +168,7 @@ router.post(
 router.get(
   '/dispatch/:id/challan',
   operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE),
   OperationsController.getDeliveryChallan
 );
 
@@ -160,11 +178,13 @@ router.get(
 router.get(
   '/technicians/roster',
   operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE),
   OperationsController.getTechnicianRoster
 );
 router.get(
   '/technicians/availability',
   operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE, ROLES.SALES),
   OperationsController.getTechnicianAvailability
 );
 router.post(
@@ -180,6 +200,7 @@ router.post(
 router.get(
   '/installations/:id',
   operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.TECHNICIAN),
   OperationsController.getJobCard
 );
 router.post(
@@ -214,6 +235,7 @@ router.post(
 router.get(
   '/warranties/:serialNumber',
   operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE, ROLES.SUPPORT, ROLES.TECHNICIAN),
   OperationsController.getWarrantyBySerialNumber
 );
 router.post(
@@ -225,6 +247,7 @@ router.post(
 router.post(
   '/warranties/claims',
   operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.SUPPORT, ROLES.WAREHOUSE, ROLES.CUSTOMER),
   OperationsController.createClaim
 );
 router.get(
@@ -232,6 +255,72 @@ router.get(
   operationsAuthenticate,
   authorize(ROLES.ADMIN, ROLES.SUPPORT, ROLES.WAREHOUSE),
   OperationsController.listClaims
+);
+
+// ==========================================
+// Phase 7: Warehouse & Admin Quotations Flow
+// ==========================================
+router.get(
+  '/warehouse-quotations',
+  operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE),
+  WarehouseQuotationController.listQuotations
+);
+
+router.get(
+  '/warehouse-quotations/projects-needing-quotes',
+  operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE),
+  WarehouseQuotationController.getProjectsNeedingQuotes
+);
+
+router.get(
+  '/warehouse-quotations/suggested-bom',
+  operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE),
+  WarehouseQuotationController.getSuggestedBom
+);
+
+router.get(
+  '/warehouse-quotations/customer/:customerId',
+  operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE, ROLES.CUSTOMER),
+  WarehouseQuotationController.getCustomerQuotation
+);
+
+router.get(
+  '/warehouse-quotations/:id',
+  operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE, ROLES.CUSTOMER),
+  WarehouseQuotationController.getQuotationById
+);
+
+router.post(
+  '/warehouse-quotations/draft',
+  operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE),
+  WarehouseQuotationController.saveDraft
+);
+
+router.post(
+  '/warehouse-quotations/:id/submit-admin',
+  operationsAuthenticate,
+  authorize(ROLES.ADMIN, ROLES.WAREHOUSE),
+  WarehouseQuotationController.submitToAdmin
+);
+
+router.post(
+  '/warehouse-quotations/:id/admin-review',
+  operationsAuthenticate,
+  authorize(ROLES.ADMIN),
+  WarehouseQuotationController.adminReview
+);
+
+router.post(
+  '/warehouse-quotations/:id/customer-action',
+  operationsAuthenticate,
+  authorize(ROLES.CUSTOMER, ROLES.ADMIN),
+  WarehouseQuotationController.customerAction
 );
 
 export default router;

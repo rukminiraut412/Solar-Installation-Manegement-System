@@ -104,17 +104,53 @@ export class AuthController {
 
   static async register(req, res, next) {
     try {
-      const { fullName, email, password, phone, businessName, address } = req.body;
-      const newUser = await AuthService.registerSeller({
+      const {
         fullName,
         email,
         password,
         phone,
+        addressStreet,
+        addressCity,
+        addressState,
+        addressPincode,
+        installationLocation,
+        solarRequirement,
+        requiredCapacityKw,
+        electricityConsumerNumber,
+        businessName,
+        address,
+      } = req.body;
+
+      if (businessName) {
+        const result = await AuthService.registerSeller({
+          fullName,
+          email,
+          password,
+          phone,
+          businessName,
+          address: address || addressStreet,
+        });
+        return successResponse(res, result, 'Seller account registered successfully. You may now log in.', 201);
+      }
+
+      const newUser = await AuthService.registerCustomer({
+        fullName,
+        email,
+        password,
+        phone,
+        addressStreet,
+        addressCity,
+        addressState,
+        addressPincode,
+        installationLocation,
+        solarRequirement,
+        requiredCapacityKw,
+        electricityConsumerNumber,
         businessName,
         address,
       });
 
-      return successResponse(res, newUser, 'Seller account registered successfully. You may now log in.', 201);
+      return successResponse(res, newUser, 'Customer account registered successfully. You may now log in.', 201);
     } catch (err) {
       next(err);
     }

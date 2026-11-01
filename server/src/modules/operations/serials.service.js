@@ -216,7 +216,7 @@ export const SerialsService = {
     }
 
     // Verify serial matches one of the serialized items on the dispatch manifest
-    const manifestItem = dispatch.items.find(i => i.productId === item.productId);
+    const manifestItem = dispatch.items.find(i => i.productId === item.productId || (i.sku && item.sku && i.sku.toUpperCase() === item.sku.toUpperCase()));
     if (!manifestItem) {
       throw {
         status: 422,
@@ -238,7 +238,7 @@ export const SerialsService = {
     // Check if required quantity for this product has already been fully scanned
     const alreadyScannedForProd = dispatch.scannedSerials.filter(sn => {
       const sItem = store.serialItems.get(sn);
-      return sItem && sItem.productId === item.productId;
+      return sItem && (sItem.productId === manifestItem.productId || (sItem.sku && manifestItem.sku && sItem.sku.toUpperCase() === manifestItem.sku.toUpperCase()));
     }).length;
 
     if (alreadyScannedForProd >= manifestItem.quantity) {

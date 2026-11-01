@@ -32,7 +32,23 @@ export const InventoryService = {
       ORDER BY p.category, p.name;
     `;
     const sqlRes = await OperationsDb.execute(sql);
-    if (sqlRes && sqlRes.rows) return sqlRes.rows;
+    if (sqlRes && sqlRes.rows) {
+      return sqlRes.rows.map((r) => ({
+        ...r,
+        productId: r.product_id,
+        sku: r.sku,
+        name: r.name,
+        category: r.category,
+        unit: r.unit,
+        minSafetyStock: Number(r.min_safety_stock),
+        warehouseLocation: r.warehouse_location,
+        storageBin: r.storage_bin,
+        onHandQuantity: Number(r.on_hand_quantity),
+        reservedQuantity: Number(r.reserved_quantity),
+        availableQuantity: Number(r.available_quantity),
+        isLowStock: Number(r.available_quantity) <= Number(r.min_safety_stock),
+      }));
+    }
 
     const store = OperationsDb.getStore();
     const result = [];

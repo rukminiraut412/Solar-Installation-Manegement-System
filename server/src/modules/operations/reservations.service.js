@@ -72,7 +72,7 @@ export const ReservationsService = {
         quantityReserved: 0,
         quantityDispatched: 0,
         unit: item.unit || matchedProd.unit,
-        isSerialized: matchedProd.isSerialized,
+        isSerialized: matchedProd.is_serialized ?? matchedProd.isSerialized ?? false,
         unitCost: matchedProd.unitCost,
         unitPrice: matchedProd.unitPrice
       });
@@ -149,7 +149,7 @@ export const ReservationsService = {
       const remainingNeeded = item.quantityRequired - item.quantityReserved;
       if (remainingNeeded <= 0) continue;
 
-      const inv = store.inventory.get(item.productId) || { onHandQuantity: 0, reservedQuantity: 0 };
+      const inv = (item.sku && store.inventory.get(item.sku)) || store.inventory.get(item.productId) || { onHandQuantity: 0, reservedQuantity: 0 };
       const onHand = inv.onHandQuantity || 0;
       const reserved = inv.reservedQuantity || 0;
       const available = Math.max(0, onHand - reserved);
@@ -196,8 +196,10 @@ export const ReservationsService = {
 
     // All items available: Execute reservation atomically
     for (const { item, quantityToReserve } of reservationsToMake) {
-      const inv = store.inventory.get(item.productId);
-      inv.reservedQuantity += quantityToReserve;
+      const inv = (item.sku && store.inventory.get(item.sku)) || store.inventory.get(item.productId);
+      if (inv) {
+        inv.reservedQuantity += quantityToReserve;
+      }
 
       item.quantityReserved += quantityToReserve;
 

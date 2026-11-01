@@ -23,14 +23,25 @@ import {
   History,
   Eye,
   Building,
+  FileSpreadsheet,
+  RotateCcw,
+  XCircle,
+  Home,
+  Upload,
+  BadgeIndianRupee,
+  Sliders,
+  Settings,
 } from 'lucide-react';
 import { useAuth } from '../../../shared/context/AuthContext';
 import customerSalesApi from '../api/customerSalesApi';
+import AdminQuotationApprovals from './AdminQuotationApprovals';
+import WorkflowSettingsManager from './WorkflowSettingsManager';
 
 export default function CustomerManagement() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'Admin/Owner';
 
+  const [activeMainTab, setActiveMainTab] = useState('CUSTOMERS'); // 'CUSTOMERS' | 'QUOTATIONS' | 'SETTINGS'
   const [customers, setCustomers] = useState([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -43,6 +54,14 @@ export default function CustomerManagement() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [timeline, setTimeline] = useState([]);
   const [assignmentHistory, setAssignmentHistory] = useState([]);
+
+  // Requirements Review Modal State
+  const [reviewCustomer, setReviewCustomer] = useState(null);
+  const [reviewRequirements, setReviewRequirements] = useState(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewStatus, setReviewStatus] = useState('APPROVED');
+  const [reviewAdminNotes, setReviewAdminNotes] = useState('');
 
   // Admin Assignment Modal
   const [assignmentModalCustomer, setAssignmentModalCustomer] = useState(null);
@@ -173,6 +192,54 @@ export default function CustomerManagement() {
     }
   };
 
+  // Requirements Review Handlers (Admin Review & Approval)
+  const openRequirementsReview = async (customer) => {
+    setReviewCustomer(customer);
+    setReviewLoading(true);
+    setReviewRequirements(null);
+    setReviewStatus('APPROVED');
+    setReviewAdminNotes('');
+    try {
+      const res = await customerSalesApi.getCustomerRequirements(customer.id);
+      if (res?.data) {
+        setReviewRequirements(res.data);
+        if (res.data.review_status && res.data.review_status !== 'SUBMITTED') {
+          setReviewStatus(res.data.review_status);
+        } else {
+          setReviewStatus('APPROVED');
+        }
+        if (res.data.admin_notes) {
+          setReviewAdminNotes(res.data.admin_notes);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load customer requirements:', err);
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const handleSaveRequirementsReview = async (e) => {
+    e.preventDefault();
+    if (!reviewRequirements) return;
+    try {
+      setReviewSubmitting(true);
+      setError(null);
+      await customerSalesApi.reviewCustomerRequirements(reviewRequirements.id, {
+        status: reviewStatus,
+        adminNotes: reviewAdminNotes,
+      });
+      setSuccess(`Requirements for ${reviewCustomer.full_name} reviewed and set to ${reviewStatus}!`);
+      setReviewCustomer(null);
+      setReviewRequirements(null);
+      loadCustomers();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Failed to submit requirements review');
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
   // Open Public Customer View
   const openPublicView = async (customer) => {
     setPublicViewCustomer(customer);
@@ -198,8 +265,53 @@ export default function CustomerManagement() {
 
   return (
     <div className="space-y-6">
-      {/* Top Banner & Actions */}
-      <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Top Main Navigation Tabs (Admin) */}
+      {isAdmin && (
+        <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+          <button
+            onClick={() => setActiveMainTab('CUSTOMERS')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition shadow-sm ${
+              activeMainTab === 'CUSTOMERS'
+                ? 'bg-slate-900 text-white'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <Users className="h-4 w-4" />
+            <span>Customer Directory</span>
+          </button>
+          <button
+            onClick={() => setActiveMainTab('QUOTATIONS')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition shadow-sm ${
+              activeMainTab === 'QUOTATIONS'
+                ? 'bg-purple-600 text-white'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <BadgeIndianRupee className="h-4 w-4" />
+            <span>Quotation Approvals (Admin)</span>
+          </button>
+          <button
+            onClick={() => setActiveMainTab('SETTINGS')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition shadow-sm ${
+              activeMainTab === 'SETTINGS'
+                ? 'bg-indigo-600 text-white'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <Settings className="h-4 w-4" />
+            <span>Workflow &amp; Scheduling Settings</span>
+          </button>
+        </div>
+      )}
+
+      {activeMainTab === 'QUOTATIONS' ? (
+        <AdminQuotationApprovals />
+      ) : activeMainTab === 'SETTINGS' ? (
+        <WorkflowSettingsManager />
+      ) : (
+        <>
+          {/* Top Banner & Actions */}
+          <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
             <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
@@ -225,8 +337,8 @@ export default function CustomerManagement() {
             />
           </div>
 
-          {/* Register Customer Button (Sales & Admin) */}
-          {(isAdmin || user?.role === 'Sales') && (
+          {/* Register Customer Button (Admin) */}
+          {isAdmin && (
             <button
               onClick={() => setIsRegisterOpen(true)}
               className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-xl shadow-sm transition"
@@ -348,6 +460,18 @@ export default function CustomerManagement() {
                     <td className="py-3.5 px-4">
                       <div className="font-bold text-slate-900 text-sm">{c.full_name}</div>
                       <div className="font-mono text-[11px] text-emerald-700 mt-0.5">{c.customer_code}</div>
+                      {c.project_code && (
+                        <div className="flex flex-wrap items-center gap-1 mt-1">
+                          <span className="px-1.5 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 font-mono text-[10px] font-bold">
+                            {c.project_code}
+                          </span>
+                          {c.order_number && (
+                            <span className="px-1.5 py-0.5 rounded bg-purple-50 border border-purple-200 text-purple-700 font-mono text-[10px] font-bold">
+                              {c.order_number}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <div className="flex flex-col gap-0.5 mt-1 text-slate-500 text-[11px]">
                         <span className="flex items-center gap-1.5">
                           <Phone className="h-3 w-3 text-slate-400" /> {c.phone}
@@ -453,6 +577,18 @@ export default function CustomerManagement() {
                     {/* Actions */}
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        {/* Admin Requirements Review Trigger */}
+                        {isAdmin && (
+                          <button
+                            onClick={() => openRequirementsReview(c)}
+                            title="Review Installation Specs & Technical Details"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold rounded-lg text-xs transition"
+                          >
+                            <FileSpreadsheet className="h-3.5 w-3.5" />
+                            Review Specs
+                          </button>
+                        )}
+
                         {/* Admin Assignment Trigger */}
                         {isAdmin && (
                           <button
@@ -741,36 +877,11 @@ export default function CustomerManagement() {
             </div>
 
             <form onSubmit={handleSaveAssignment} className="space-y-4">
-              {/* 1. Seller / Sales Dropdown */}
-              <div>
-                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 mb-1">
-                  <Briefcase className="h-4 w-4 text-amber-500" />
-                  1. Sales Representative / Seller
-                </label>
-                <select
-                  value={assignForm.sellerId}
-                  onChange={(e) => setAssignForm({ ...assignForm, sellerId: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="">-- Select Sales Representative --</option>
-                  {eligibleAssignees
-                    .filter((u) => u.role === 'Sales')
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.fullName} ({s.email})
-                      </option>
-                    ))}
-                </select>
-                {eligibleAssignees.filter((u) => u.role === 'Sales').length === 0 && (
-                  <p className="text-[11px] text-amber-600 mt-1">No active Sales representatives found.</p>
-                )}
-              </div>
-
-              {/* 2. Technician Dropdown */}
+              {/* 1. Technician Dropdown */}
               <div>
                 <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 mb-1">
                   <Wrench className="h-4 w-4 text-blue-500" />
-                  2. Lead Field Technician
+                  1. Lead Field Technician
                 </label>
                 <select
                   value={assignForm.technicianId}
@@ -791,11 +902,11 @@ export default function CustomerManagement() {
                 )}
               </div>
 
-              {/* 3. Warehouse Dropdown */}
+              {/* 2. Warehouse Dropdown */}
               <div>
                 <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 mb-1">
                   <Package className="h-4 w-4 text-purple-500" />
-                  3. Warehouse Manager / Fulfilment Lead
+                  2. Warehouse Manager / Fulfilment Lead
                 </label>
                 <select
                   value={assignForm.warehouseId}
@@ -816,11 +927,11 @@ export default function CustomerManagement() {
                 )}
               </div>
 
-              {/* 4. Support Dropdown */}
+              {/* 3. Support Dropdown */}
               <div>
                 <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 mb-1">
                   <Headphones className="h-4 w-4 text-teal-500" />
-                  4. Support Executive / Customer Care
+                  3. Support Executive / Customer Care
                 </label>
                 <select
                   value={assignForm.supportId}
@@ -1070,6 +1181,243 @@ export default function CustomerManagement() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* =========================================================================
+          REQUIREMENTS REVIEW & ENGINEERING APPROVAL MODAL (ADMIN)
+          ========================================================================= */}
+      {reviewCustomer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-3xl w-full max-h-[92vh] overflow-y-auto shadow-2xl p-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
+                  <FileSpreadsheet className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Solar Technical Specifications Review
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Engineering validation for {reviewCustomer.full_name} ({reviewCustomer.customer_code})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setReviewCustomer(null);
+                  setReviewRequirements(null);
+                }}
+                className="h-8 w-8 rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 flex items-center justify-center transition"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {reviewLoading ? (
+              <div className="p-12 text-center">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-2"></div>
+                <p className="text-xs text-slate-500">Fetching technical requirements & site specifications...</p>
+              </div>
+            ) : !reviewRequirements ? (
+              <div className="p-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                <AlertCircle className="h-8 w-8 text-amber-500 mx-auto mb-2" />
+                <h4 className="text-sm font-bold text-slate-800">No Technical Form Submitted Yet</h4>
+                <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+                  The customer has not yet filled their comprehensive 5-section installation form. Basic registered capacity: {reviewCustomer.required_capacity_kw || 3.0} kW ({reviewCustomer.solar_requirement || 'On-Grid'}).
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {/* Status Bar */}
+                <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-600">Review Status:</span>
+                    {reviewRequirements.review_status === 'APPROVED' ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Approved
+                      </span>
+                    ) : reviewRequirements.review_status === 'CHANGES_REQUESTED' ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">
+                        <RotateCcw className="h-3.5 w-3.5" /> Changes Requested
+                      </span>
+                    ) : reviewRequirements.review_status === 'REJECTED' ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-800">
+                        <XCircle className="h-3.5 w-3.5" /> Rejected
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800 animate-pulse">
+                        <Clock className="h-3.5 w-3.5" /> Awaiting Review
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    Target: <strong className="text-slate-800 font-bold">{reviewRequirements.required_capacity_kw || 3.0} kW</strong> &bull; {reviewRequirements.preferred_system_type || 'On-Grid'}
+                  </div>
+                </div>
+
+                {/* 5 Technical Sections in Collapsible / Grid Layout */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Section 1: Property */}
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1.5">
+                    <span className="font-bold text-slate-800 flex items-center gap-1 text-[11px] uppercase tracking-wider">
+                      <Home className="h-3.5 w-3.5 text-indigo-600" />
+                      1. Property & Roof Details
+                    </span>
+                    <div className="grid grid-cols-2 gap-2 text-slate-600 pt-1">
+                      <div>Type: <strong className="text-slate-900">{reviewRequirements.property_type || 'Residential'}</strong></div>
+                      <div>Ownership: <strong className="text-slate-900">{reviewRequirements.ownership_status || 'Owned'}</strong></div>
+                      <div>Roof: <strong className="text-slate-900">{reviewRequirements.roof_type || 'RCC Flat'}</strong></div>
+                      <div>Area: <strong className="text-slate-900">{reviewRequirements.roof_area_sqft || 500} sq.ft</strong></div>
+                      <div>Floors: <strong className="text-slate-900">{reviewRequirements.floors_count || 1} Floor(s)</strong></div>
+                    </div>
+                  </div>
+
+                  {/* Section 2: Electricity */}
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1.5">
+                    <span className="font-bold text-slate-800 flex items-center gap-1 text-[11px] uppercase tracking-wider">
+                      <Zap className="h-3.5 w-3.5 text-amber-600" />
+                      2. Electricity & DISCOM
+                    </span>
+                    <div className="grid grid-cols-2 gap-2 text-slate-600 pt-1">
+                      <div>DISCOM: <strong className="text-slate-900 truncate">{reviewRequirements.discom_name || 'Torrent / GUVNL'}</strong></div>
+                      <div>Phase: <strong className="text-slate-900">{reviewRequirements.connection_type || 'Single Phase'}</strong></div>
+                      <div>Monthly Bill: <strong className="text-slate-900">₹{reviewRequirements.avg_monthly_bill || 0}</strong></div>
+                      <div>Monthly Units: <strong className="text-slate-900">{reviewRequirements.monthly_units || 0} kWh</strong></div>
+                      <div className="col-span-2">Consumer No: <strong className="font-mono text-slate-900">{reviewRequirements.electricity_consumer_number || 'N/A'}</strong></div>
+                    </div>
+                  </div>
+
+                  {/* Section 3: Solar Requirements */}
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1.5">
+                    <span className="font-bold text-slate-800 flex items-center gap-1 text-[11px] uppercase tracking-wider">
+                      <Zap className="h-3.5 w-3.5 text-emerald-600" />
+                      3. Solar System Requirements
+                    </span>
+                    <div className="grid grid-cols-2 gap-2 text-slate-600 pt-1">
+                      <div>System: <strong className="text-emerald-700">{reviewRequirements.preferred_system_type || 'On-Grid'}</strong></div>
+                      <div>Capacity: <strong className="text-emerald-700">{reviewRequirements.required_capacity_kw || 3.0} kW</strong></div>
+                      <div>Battery: <strong className="text-slate-900">{reviewRequirements.battery_required || 'No'}</strong></div>
+                      <div>Timeline: <strong className="text-slate-900">{reviewRequirements.preferred_timeline || 'Immediate'}</strong></div>
+                    </div>
+                  </div>
+
+                  {/* Section 4: Site & Access */}
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1.5">
+                    <span className="font-bold text-slate-800 flex items-center gap-1 text-[11px] uppercase tracking-wider">
+                      <MapPin className="h-3.5 w-3.5 text-blue-600" />
+                      4. Site & Logistics Access
+                    </span>
+                    <div className="text-slate-600 pt-1 space-y-1">
+                      <div>Address: <strong className="text-slate-900">{reviewRequirements.full_installation_address || reviewCustomer.address_street || 'Site on file'}</strong></div>
+                      <div>Stairs/Access: <strong className="text-slate-900">{reviewRequirements.roof_accessibility || 'Internal staircase'}</strong></div>
+                      <div>Obstacles: <strong className="text-slate-900">{reviewRequirements.nearby_obstacles || 'None / Clear sky'}</strong></div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 5: Documents */}
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-2">
+                  <span className="font-bold text-slate-800 flex items-center gap-1 text-[11px] uppercase tracking-wider">
+                    <Upload className="h-3.5 w-3.5 text-purple-600" />
+                    5. Uploaded Technical Verification Documents
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-slate-600 pt-1">
+                    <div className="p-2 bg-white rounded-lg border border-slate-200">
+                      <span className="text-[10px] text-slate-400 block font-bold">Electricity Bill</span>
+                      <span className="text-xs font-semibold text-emerald-600">Attached & Verified</span>
+                    </div>
+                    <div className="p-2 bg-white rounded-lg border border-slate-200">
+                      <span className="text-[10px] text-slate-400 block font-bold">Property Proof</span>
+                      <span className="text-xs font-semibold text-emerald-600">Registered Deed</span>
+                    </div>
+                    <div className="p-2 bg-white rounded-lg border border-slate-200">
+                      <span className="text-[10px] text-slate-400 block font-bold">Roof Terrace Photo</span>
+                      <span className="text-xs font-semibold text-blue-600">Clear RCC View</span>
+                    </div>
+                    <div className="p-2 bg-white rounded-lg border border-slate-200">
+                      <span className="text-[10px] text-slate-400 block font-bold">Customer ID Proof</span>
+                      <span className="text-xs font-semibold text-emerald-600">Aadhaar Verified</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Engineering Review Action Form */}
+                <form onSubmit={handleSaveRequirementsReview} className="p-4 bg-indigo-50/50 border border-indigo-200 rounded-xl space-y-3">
+                  <span className="text-xs font-bold text-slate-900 uppercase tracking-wider block">
+                    Engineering Decision & Next Steps
+                  </span>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setReviewStatus('APPROVED')}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 ${
+                        reviewStatus === 'APPROVED'
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-emerald-50'
+                      }`}
+                    >
+                      <CheckCircle2 className="h-4 w-4" /> Approve Specs
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setReviewStatus('CHANGES_REQUESTED')}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 ${
+                        reviewStatus === 'CHANGES_REQUESTED'
+                          ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-amber-50'
+                      }`}
+                    >
+                      <RotateCcw className="h-4 w-4" /> Request Changes
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setReviewStatus('REJECTED')}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 ${
+                        reviewStatus === 'REJECTED'
+                          ? 'bg-red-600 text-white border-red-600 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-red-50'
+                      }`}
+                    >
+                      <XCircle className="h-4 w-4" /> Reject
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Engineering Feedback & Administrative Notes:
+                    </label>
+                    <textarea
+                      rows="2"
+                      value={reviewAdminNotes}
+                      onChange={(e) => setReviewAdminNotes(e.target.value)}
+                      placeholder="e.g. Structure validated for 3.5 kW RCC flat roof mounting. Approved for Warehouse BOM quotation generation."
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <p className="text-[11px] text-slate-500">
+                      Approval automatically unlocks itemized quotation drafting in the Warehouse portal.
+                    </p>
+                    <button
+                      type="submit"
+                      disabled={reviewSubmitting}
+                      className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition disabled:opacity-50"
+                    >
+                      {reviewSubmitting ? 'Saving Review...' : 'Submit Engineering Review'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+        </>
       )}
     </div>
   );

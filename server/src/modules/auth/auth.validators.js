@@ -25,6 +25,17 @@ export const registerSchema = z.object({
   email: z.string().trim().email('Invalid email address format'),
   phone: z.string().trim().min(6, 'Mobile number is required'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
+  // Address details
+  addressStreet: z.string().trim().optional(),
+  addressCity: z.string().trim().optional(),
+  addressState: z.string().trim().optional(),
+  addressPincode: z.string().trim().optional(),
+  // Solar system requirements
+  installationLocation: z.string().trim().optional(),
+  solarRequirement: z.string().trim().optional(),
+  requiredCapacityKw: z.union([z.number(), z.string()]).optional(),
+  electricityConsumerNumber: z.string().trim().optional(),
+  // Backward compatibility fields
   businessName: z.string().trim().optional(),
   address: z.string().trim().optional(),
 });

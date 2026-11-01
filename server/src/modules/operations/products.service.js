@@ -28,7 +28,25 @@ export const ProductsService = {
     sql += ' ORDER BY created_at DESC;';
 
     const sqlRes = await OperationsDb.execute(sql, params);
-    if (sqlRes && sqlRes.rows) return sqlRes.rows;
+    if (sqlRes && sqlRes.rows) {
+      const store = OperationsDb.getStore();
+      for (const p of sqlRes.rows) {
+        for (const inv of store.inventory.values()) {
+          if (inv.sku?.toUpperCase() === p.sku?.toUpperCase()) {
+            store.inventory.set(p.id, inv);
+          }
+        }
+      }
+      return sqlRes.rows.map((p) => ({
+        ...p,
+        unitCost: Number(p.unit_cost ?? p.unitCost ?? 0),
+        unitPrice: Number(p.unit_price ?? p.unitPrice ?? 0),
+        minSafetyStock: Number(p.min_safety_stock ?? p.minSafetyStock ?? 0),
+        isSerialized: p.is_serialized ?? p.isSerialized,
+        warrantyMonths: Number(p.warranty_months ?? p.warrantyMonths ?? 0),
+        isActive: p.is_active ?? p.isActive,
+      }));
+    }
 
     let products = OperationsDb.getStore().products;
     if (filters.category) {
@@ -47,7 +65,26 @@ export const ProductsService = {
   async getProductByIdOrSku(identifier) {
     const sql = 'SELECT * FROM products WHERE id::text = $1 OR UPPER(sku) = UPPER($1) LIMIT 1;';
     const sqlRes = await OperationsDb.execute(sql, [identifier]);
-    if (sqlRes && sqlRes.rows && sqlRes.rows.length > 0) return sqlRes.rows[0];
+    if (sqlRes && sqlRes.rows && sqlRes.rows.length > 0) {
+      const p = sqlRes.rows[0];
+      const prod = {
+        ...p,
+        unitCost: Number(p.unit_cost ?? p.unitCost ?? 0),
+        unitPrice: Number(p.unit_price ?? p.unitPrice ?? 0),
+        minSafetyStock: Number(p.min_safety_stock ?? p.minSafetyStock ?? 0),
+        isSerialized: p.is_serialized ?? p.isSerialized,
+        warrantyMonths: Number(p.warranty_months ?? p.warrantyMonths ?? 0),
+        isActive: p.is_active ?? p.isActive
+      };
+      // Map postgres product.id (UUID) to mockStore.inventory matching SKU
+      const store = OperationsDb.getStore();
+      for (const inv of store.inventory.values()) {
+        if (inv.sku?.toUpperCase() === p.sku?.toUpperCase()) {
+          store.inventory.set(p.id, inv);
+        }
+      }
+      return prod;
+    }
 
     const store = OperationsDb.getStore();
     return store.products.find(p => p.id === identifier || p.sku.toUpperCase() === identifier.toUpperCase()) || null;

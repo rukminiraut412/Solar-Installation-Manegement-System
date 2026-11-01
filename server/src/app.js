@@ -12,6 +12,8 @@ import mediaRouter from './shared/routes/media.routes.js';
 import customerSalesRouter from './modules/customer-sales/customer-sales.routes.js';
 import operationsRouter from './modules/operations/operations.routes.js';
 import supportFinanceRouter from './modules/support-finance/routes.js';
+import workflowRouter from './modules/shared/workflow.routes.js';
+import notificationsRouter from './modules/shared/notifications.routes.js';
 
 const app = express();
 
@@ -79,6 +81,12 @@ apiRouter.use('/operations', operationsRouter);
 
 // Mount Member 4 Support, Finance & AI module
 apiRouter.use('/support-finance', supportFinanceRouter);
+
+// Mount Sequential Workflow & Tab Gating Router
+apiRouter.use('/workflow', workflowRouter);
+
+// Mount Database-backed Real-time Notifications Router
+apiRouter.use('/notifications', notificationsRouter);
 
 // Mount API router
 app.use('/api/v1', apiRouter);

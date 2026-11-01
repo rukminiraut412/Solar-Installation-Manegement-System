@@ -22,37 +22,25 @@ export default function Sidebar({ activeTab, onSelectTab }) {
       id: 'dashboard',
       label: 'Business Overview',
       icon: LayoutDashboard,
-      roles: ['Admin/Owner', 'Sales', 'Warehouse', 'Technician', 'Support'],
+      roles: ['Admin/Owner', 'Warehouse', 'Technician', 'Support'],
     },
     {
       id: 'customers',
       label: 'Customer Directory',
       icon: Users,
-      roles: ['Admin/Owner', 'Sales', 'Warehouse', 'Technician', 'Support'],
-    },
-    {
-      id: 'leads',
-      label: 'Leads & Enquiries',
-      icon: Users,
-      roles: ['Admin/Owner', 'Sales', 'Support'],
-    },
-    {
-      id: 'quotes',
-      label: 'Surveys & Quotes',
-      icon: FileSpreadsheet,
-      roles: ['Admin/Owner', 'Sales'],
-    },
-    {
-      id: 'jobs',
-      label: 'Rooftop Jobs',
-      icon: Wrench,
-      roles: ['Admin/Owner', 'Sales', 'Warehouse', 'Technician', 'Support'],
+      roles: ['Admin/Owner', 'Warehouse', 'Technician', 'Support'],
     },
     {
       id: 'inventory',
-      label: 'Inventory & Stock',
+      label: role === 'Warehouse' ? 'Operations & Fulfilment Hub' : 'Operations Oversight',
       icon: Boxes,
-      roles: ['Admin/Owner', 'Warehouse', 'Sales'],
+      roles: ['Admin/Owner', 'Warehouse'],
+    },
+    {
+      id: 'jobs',
+      label: role === 'Technician' ? 'My Field Job Cards' : 'Rooftop Field Jobs',
+      icon: Wrench,
+      roles: ['Admin/Owner', 'Technician'],
     },
     {
       id: 'tickets',
@@ -81,6 +69,35 @@ export default function Sidebar({ activeTab, onSelectTab }) {
     },
   ];
 
+  const CUSTOMER_NAV_ITEMS = [
+    {
+      id: 'dashboard',
+      label: 'My Solar Dashboard',
+      icon: LayoutDashboard,
+      roles: ['Customer'],
+    },
+    {
+      id: 'requirements',
+      label: 'Installation Specs',
+      icon: FileSpreadsheet,
+      roles: ['Customer'],
+    },
+    {
+      id: 'status',
+      label: 'Installation Status',
+      icon: Wrench,
+      roles: ['Customer'],
+    },
+    {
+      id: 'tickets',
+      label: 'Support & Tickets',
+      icon: LifeBuoy,
+      roles: ['Customer'],
+    },
+  ];
+
+  const activeNavItems = role === 'Customer' ? CUSTOMER_NAV_ITEMS : NAV_ITEMS;
+
   return (
     <aside className="w-64 border-r border-slate-200 bg-white flex flex-col justify-between p-4 shrink-0 shadow-sm">
       <div className="space-y-1">
@@ -88,7 +105,7 @@ export default function Sidebar({ activeTab, onSelectTab }) {
           Navigation &bull; {role}
         </div>
 
-        {NAV_ITEMS.map((item) => {
+        {activeNavItems.map((item) => {
           const isAllowed = item.roles.includes(role);
           const isActive = activeTab === item.id;
 

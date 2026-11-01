@@ -5,10 +5,10 @@ import { Sun, Lock, Mail, AlertCircle, CheckCircle2, ArrowRight, ShieldCheck, Bu
 
 const DEMO_ACCOUNTS = [
   { role: 'Admin/Owner', email: 'admin@sunpower.com', pass: 'Admin@12345', badge: 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100' },
-  { role: 'Sales', email: 'sales@sunpower.com', pass: 'Sales@12345', badge: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' },
   { role: 'Warehouse', email: 'warehouse@sunpower.com', pass: 'Warehouse@12345', badge: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100' },
   { role: 'Technician', email: 'technician@sunpower.com', pass: 'Technician@12345', badge: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' },
   { role: 'Support', email: 'support@sunpower.com', pass: 'Support@12345', badge: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100' },
+  { role: 'Customer', email: 'customer@sunpower.com', pass: 'Customer@12345', badge: 'bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100' },
 ];
 
 export default function Login() {
@@ -19,14 +19,23 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // Seller Registration State
+  // Customer Registration State
   const [regFullName, setRegFullName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPhone, setRegPhone] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regConfirmPassword, setRegConfirmPassword] = useState('');
-  const [regBusinessName, setRegBusinessName] = useState('');
-  const [regAddress, setRegAddress] = useState('');
+  
+  // Address State
+  const [regStreet, setRegStreet] = useState('');
+  const [regCity, setRegCity] = useState('Ahmedabad');
+  const [regState, setRegState] = useState('Gujarat');
+  const [regPincode, setRegPincode] = useState('');
+
+  // Solar Requirement State
+  const [regSystemType, setRegSystemType] = useState('Residential');
+  const [regCapacityKw, setRegCapacityKw] = useState('3.0');
+  const [regConsumerNo, setRegConsumerNo] = useState('');
 
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -71,11 +80,16 @@ export default function Login() {
         email: regEmail,
         phone: regPhone,
         password: regPassword,
-        businessName: regBusinessName || undefined,
-        address: regAddress || undefined,
+        addressStreet: regStreet,
+        addressCity: regCity,
+        addressState: regState,
+        addressPincode: regPincode,
+        solarRequirement: regSystemType,
+        requiredCapacityKw: parseFloat(regCapacityKw) || 3.0,
+        electricityConsumerNumber: regConsumerNo || undefined,
       });
 
-      setSuccessMsg(res.data?.message || 'Registration successful! You may now sign in with your credentials.');
+      setSuccessMsg(res.data?.message || 'Registration successful! You may now sign in to your Customer Portal.');
       setEmail(regEmail);
       setPassword('');
       setMode('login');
@@ -85,8 +99,9 @@ export default function Login() {
       setRegPhone('');
       setRegPassword('');
       setRegConfirmPassword('');
-      setRegBusinessName('');
-      setRegAddress('');
+      setRegStreet('');
+      setRegPincode('');
+      setRegConsumerNo('');
     } catch (err) {
       const msg = err.response?.data?.message || 'Registration failed. Please verify your details.';
       setError(msg);
@@ -110,7 +125,7 @@ export default function Login() {
           <Sun className="h-8 w-8 text-emerald-600" />
         </div>
         <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">SunPower Solutions</h2>
-        <p className="mt-1 text-sm text-slate-600">Commercial Solar Installation Management Platform</p>
+        <p className="mt-1 text-sm text-slate-600">Solar Installation &amp; Lifecycle Management System</p>
 
         {/* Tab switch */}
         <div className="mt-6 flex justify-center">
@@ -124,7 +139,7 @@ export default function Login() {
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Staff &amp; Partner Sign In
+              Sign In (All Roles)
             </button>
             <button
               type="button"
@@ -135,7 +150,7 @@ export default function Login() {
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Public Seller Registration
+              New Customer Sign Up
             </button>
           </div>
         </div>
@@ -219,130 +234,118 @@ export default function Login() {
             <form onSubmit={handleRegisterSubmit} className="space-y-4">
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-800 flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
-                <span>Public registration is available exclusively for Solar Sellers &amp; Sales Partners.</span>
+                <span>Customer Registration: Create your portal account to submit requirements, review quotations, and track installation.</span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
+              {/* 1. Personal Details */}
+              <div className="pt-1">
+                <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">1. Personal Information</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Full Name *
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                        <User className="h-4 w-4" />
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        value={regFullName}
+                        onChange={(e) => setRegFullName(e.target.value)}
+                        placeholder="e.g. Ramesh Patel"
+                        className="w-full pl-10 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Mobile Number *
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                        <Phone className="h-4 w-4" />
+                      </div>
+                      <input
+                        type="tel"
+                        required
+                        value={regPhone}
+                        onChange={(e) => setRegPhone(e.target.value)}
+                        placeholder="+91 98765 43210"
+                        className="w-full pl-10 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3">
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Full Name *
+                    Email Address *
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                      <User className="h-4 w-4" />
+                      <Mail className="h-4 w-4" />
                     </div>
                     <input
-                      type="text"
+                      type="email"
                       required
-                      value={regFullName}
-                      onChange={(e) => setRegFullName(e.target.value)}
-                      placeholder="e.g. Ramesh Sharma"
-                      className="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      value={regEmail}
+                      onChange={(e) => setRegEmail(e.target.value)}
+                      placeholder="customer@example.com"
+                      className="w-full pl-10 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Mobile Number *
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                      <Phone className="h-4 w-4" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Password *
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                        <Lock className="h-4 w-4" />
+                      </div>
+                      <input
+                        type="password"
+                        required
+                        value={regPassword}
+                        onChange={(e) => setRegPassword(e.target.value)}
+                        placeholder="Min 6 characters"
+                        className="w-full pl-10 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
                     </div>
-                    <input
-                      type="tel"
-                      required
-                      value={regPhone}
-                      onChange={(e) => setRegPhone(e.target.value)}
-                      placeholder="+91 98765 43210"
-                      className="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Confirm Password *
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                        <Lock className="h-4 w-4" />
+                      </div>
+                      <input
+                        type="password"
+                        required
+                        value={regConfirmPassword}
+                        onChange={(e) => setRegConfirmPassword(e.target.value)}
+                        placeholder="Confirm password"
+                        className="w-full pl-10 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  Email Address *
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                    <Mail className="h-4 w-4" />
-                  </div>
-                  <input
-                    type="email"
-                    required
-                    value={regEmail}
-                    onChange={(e) => setRegEmail(e.target.value)}
-                    placeholder="partner@solardealer.com"
-                    className="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* 2. Installation Address */}
+              <div className="pt-2 border-t border-slate-200">
+                <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">2. Installation Address</h4>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Password *
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                      <Lock className="h-4 w-4" />
-                    </div>
-                    <input
-                      type="password"
-                      required
-                      value={regPassword}
-                      onChange={(e) => setRegPassword(e.target.value)}
-                      placeholder="Min 6 characters"
-                      className="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Confirm Password *
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                      <Lock className="h-4 w-4" />
-                    </div>
-                    <input
-                      type="password"
-                      required
-                      value={regConfirmPassword}
-                      onChange={(e) => setRegConfirmPassword(e.target.value)}
-                      placeholder="Confirm password"
-                      className="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Business / Agency Name
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                      <Building2 className="h-4 w-4" />
-                    </div>
-                    <input
-                      type="text"
-                      value={regBusinessName}
-                      onChange={(e) => setRegBusinessName(e.target.value)}
-                      placeholder="e.g. Apex Solar Energy"
-                      className="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    City / Address
+                    Street / Building Address *
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -350,28 +353,119 @@ export default function Login() {
                     </div>
                     <input
                       type="text"
-                      value={regAddress}
-                      onChange={(e) => setRegAddress(e.target.value)}
-                      placeholder="e.g. Pune, Maharashtra"
-                      className="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      required
+                      value={regStreet}
+                      onChange={(e) => setRegStreet(e.target.value)}
+                      placeholder="e.g. 104, Sunrise Heights, SG Highway"
+                      className="w-full pl-10 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 mt-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      City
+                    </label>
+                    <input
+                      type="text"
+                      value={regCity}
+                      onChange={(e) => setRegCity(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      State
+                    </label>
+                    <input
+                      type="text"
+                      value={regState}
+                      onChange={(e) => setRegState(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Pincode *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={regPincode}
+                      onChange={(e) => setRegPincode(e.target.value)}
+                      placeholder="380001"
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Solar Requirement */}
+              <div className="pt-2 border-t border-slate-200">
+                <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">3. Initial Solar Requirements</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      System Type *
+                    </label>
+                    <select
+                      value={regSystemType}
+                      onChange={(e) => setRegSystemType(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="Residential">Residential Rooftop</option>
+                      <option value="Commercial">Commercial / Office</option>
+                      <option value="Industrial">Industrial Factory</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Required Capacity (kW) *
+                    </label>
+                    <select
+                      value={regCapacityKw}
+                      onChange={(e) => setRegCapacityKw(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="1.0">1.0 kW</option>
+                      <option value="2.0">2.0 kW</option>
+                      <option value="3.0">3.0 kW (Standard Home)</option>
+                      <option value="4.0">4.0 kW</option>
+                      <option value="5.0">5.0 kW (High Consumption)</option>
+                      <option value="10.0">10.0 kW (Commercial)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Electricity Bill Consumer No. (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={regConsumerNo}
+                    onChange={(e) => setRegConsumerNo(e.target.value)}
+                    placeholder="e.g. 102938475"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
                 </div>
               </div>
 
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full mt-2 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition shadow-sm disabled:opacity-50"
+                className="w-full mt-4 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition shadow-sm disabled:opacity-50"
               >
                 {isSubmitting ? (
                   <span className="inline-flex items-center gap-2">
                     <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Registering Seller Account...
+                    Registering Customer Account...
                   </span>
                 ) : (
                   <>
-                    Complete Seller Registration
+                    Complete Customer Registration
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}

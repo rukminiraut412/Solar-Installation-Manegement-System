@@ -9,7 +9,6 @@
 
 import crypto from 'crypto';
 import { pool } from '../../db/index.js';
-import { SOLAR_PACKAGES } from './bom-generator.js';
 
 // Pre-seeded fallback data for offline tests and development
 const fallbackStore = {
@@ -158,7 +157,19 @@ const fallbackStore = {
   orders: [],
   projects: [],
   projectBomItems: [],
+  installationRequirements: [],
 };
+
+function toValidUuidOrNull(val) {
+  if (!val) return null;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(String(val)) ? String(val) : null;
+}
+
+function toValidUuidOrRandom(val) {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return val && uuidRegex.test(String(val)) ? String(val) : crypto.randomUUID();
+}
 
 // Helper: try real DB query, fallback to memory if DB is unavailable
 async function executeDb(queryFn, fallbackFn) {
@@ -167,9 +178,13 @@ async function executeDb(queryFn, fallbackFn) {
   } catch (err) {
     if (
       err.code === 'ECONNREFUSED' ||
+      err.code === '22P02' ||
+      err.code === '23503' ||
       err.message?.includes('connect ECONNREFUSED') ||
       err.message?.includes('relation "') ||
-      err.message?.includes('does not exist')
+      err.message?.includes('does not exist') ||
+      err.message?.includes('invalid input syntax for type uuid') ||
+      err.message?.includes('violates foreign key constraint')
     ) {
       return await fallbackFn();
     }
@@ -182,7 +197,7 @@ export const CustomerSalesRepository = {
   // 1. CUSTOMERS
   // =========================================================================
   async createCustomer(data) {
-    const uniqueSuffix = `${Date.now().toString().slice(-4)}${Math.floor(100 + Math.random() * 900)}`;
+    const uniqueSuffix = String(Math.floor(1000 + Math.random() * 9000));
     const customerCode = data.customer_code || `CUST-${new Date().getFullYear()}-${uniqueSuffix}`;
 
     const customer = {
@@ -224,11 +239,11 @@ export const CustomerSalesRepository = {
           RETURNING *;
         `;
         const res = await pool.query(sql, [
-          customer.id, customer.customer_code, customer.full_name, customer.email, customer.phone,
+          toValidUuidOrRandom(customer.id), customer.customer_code, customer.full_name, customer.email, customer.phone,
           customer.address_street, customer.address_city, customer.address_state, customer.address_pincode,
           customer.electricity_consumer_number, customer.sanctioned_load_kw, customer.installation_location,
           customer.solar_requirement, customer.required_capacity_kw, customer.additional_notes,
-          customer.assignment_status, customer.created_by, customer.assigned_seller_id,
+          customer.assignment_status, toValidUuidOrNull(customer.created_by), toValidUuidOrNull(customer.assigned_seller_id),
           customer.created_at, customer.updated_at,
         ]);
         return res.rows[0];
@@ -246,6 +261,11 @@ export const CustomerSalesRepository = {
         const sql = `
           SELECT 
             c.*,
+            p.id AS project_id,
+            COALESCE(p.project_code, p.project_number) AS project_code,
+            p.project_number,
+            o.id AS order_id,
+            o.order_number,
             u_created.full_name AS creator_name,
             u_created.email AS creator_email,
             u_seller.full_name AS assigned_seller_name,
@@ -257,6 +277,8 @@ export const CustomerSalesRepository = {
             u_sup.full_name AS assigned_support_name,
             u_sup.email AS assigned_support_email
           FROM customers c
+          LEFT JOIN LATERAL (SELECT id, project_code, project_number FROM projects WHERE customer_id = c.id ORDER BY created_at DESC LIMIT 1) p ON true
+          LEFT JOIN LATERAL (SELECT id, order_number FROM orders WHERE customer_id = c.id ORDER BY created_at DESC LIMIT 1) o ON true
           LEFT JOIN users u_created ON c.created_by = u_created.id
           LEFT JOIN users u_seller ON c.assigned_seller_id = u_seller.id
           LEFT JOIN users u_tech ON c.assigned_technician_id = u_tech.id
@@ -300,6 +322,11 @@ export const CustomerSalesRepository = {
         let sql = `
           SELECT 
             c.*,
+            p.id AS project_id,
+            COALESCE(p.project_code, p.project_number) AS project_code,
+            p.project_number,
+            o.id AS order_id,
+            o.order_number,
             u_created.full_name AS creator_name,
             u_created.email AS creator_email,
             u_seller.full_name AS assigned_seller_name,
@@ -311,6 +338,8 @@ export const CustomerSalesRepository = {
             u_sup.full_name AS assigned_support_name,
             u_sup.email AS assigned_support_email
           FROM customers c
+          LEFT JOIN LATERAL (SELECT id, project_code, project_number FROM projects WHERE customer_id = c.id ORDER BY created_at DESC LIMIT 1) p ON true
+          LEFT JOIN LATERAL (SELECT id, order_number FROM orders WHERE customer_id = c.id ORDER BY created_at DESC LIMIT 1) o ON true
           LEFT JOIN users u_created ON c.created_by = u_created.id
           LEFT JOIN users u_seller ON c.assigned_seller_id = u_seller.id
           LEFT JOIN users u_tech ON c.assigned_technician_id = u_tech.id
@@ -386,13 +415,15 @@ export const CustomerSalesRepository = {
   },
 
   async assignCustomer(customerId, { sellerId = null, technicianId = null, warehouseId = null, supportId = null, notes = null } = {}, adminId = null) {
-    const cleanSeller = sellerId || null;
-    const cleanTech = technicianId || null;
-    const cleanWh = warehouseId || null;
-    const cleanSup = supportId || null;
+    const cleanAdmin = toValidUuidOrNull(adminId);
+    const cleanSeller = toValidUuidOrNull(sellerId);
+    const cleanTech = toValidUuidOrNull(technicianId);
+    const cleanWh = toValidUuidOrNull(warehouseId);
+    const cleanSup = toValidUuidOrNull(supportId);
 
-    const isFullyAssigned = !!(cleanSeller && cleanTech && cleanWh && cleanSup);
-    const isPartiallyAssigned = !!(cleanSeller || cleanTech || cleanWh || cleanSup);
+    // A customer is fully assigned when Technician, Warehouse Member and Support Person are assigned
+    const isFullyAssigned = !!(cleanTech && cleanWh && cleanSup);
+    const isPartiallyAssigned = !!(cleanTech || cleanWh || cleanSup || cleanSeller);
     const status = isFullyAssigned ? 'ASSIGNED' : (isPartiallyAssigned ? 'PARTIALLY_ASSIGNED' : 'PENDING_ASSIGNMENT');
 
     return executeDb(
@@ -420,7 +451,7 @@ export const CustomerSalesRepository = {
           `INSERT INTO customer_assignments (
              customer_id, assigned_by, seller_id, technician_id, warehouse_id, support_id, assignment_notes
            ) VALUES ($1, $2, $3, $4, $5, $6, $7);`,
-          [customerId, adminId, cleanSeller, cleanTech, cleanWh, cleanSup, notes || null]
+          [customerId, cleanAdmin, cleanSeller, cleanTech, cleanWh, cleanSup, notes || null]
         );
 
         // 3. Record timeline event
@@ -432,7 +463,7 @@ export const CustomerSalesRepository = {
             customerId,
             `Admin updated team assignment. Status: ${status}.`,
             JSON.stringify({ sellerId: cleanSeller, technicianId: cleanTech, warehouseId: cleanWh, supportId: cleanSup, status, notes }),
-            adminId,
+            cleanAdmin,
           ]
         );
 
@@ -580,7 +611,12 @@ export const CustomerSalesRepository = {
         values.push(id);
         const sql = `UPDATE customers SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *;`;
         const res = await pool.query(sql, values);
-        return res.rows[0];
+        const row = res.rows[0];
+        if (row) {
+          if (row.sanctioned_load_kw != null) row.sanctioned_load_kw = Number(row.sanctioned_load_kw);
+          if (row.required_capacity_kw != null) row.required_capacity_kw = Number(row.required_capacity_kw);
+        }
+        return row;
       },
       async () => {
         const cust = fallbackStore.customers.find((c) => c.id === id);
@@ -613,8 +649,8 @@ export const CustomerSalesRepository = {
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *;
         `;
         const res = await pool.query(sql, [
-          item.id, item.customer_id, item.event_type, item.title,
-          item.description, JSON.stringify(item.metadata), item.created_by, item.created_at,
+          toValidUuidOrRandom(item.id), item.customer_id, item.event_type, item.title,
+          item.description, JSON.stringify(item.metadata), toValidUuidOrNull(item.created_by), item.created_at,
         ]);
         return res.rows[0];
       },
@@ -646,7 +682,7 @@ export const CustomerSalesRepository = {
   async createEnquiry(data) {
     const enquiry = {
       id: data.id || crypto.randomUUID(),
-      enquiry_number: data.enquiry_number || `ENQ-${new Date().getFullYear()}-${String(fallbackStore.enquiries.length + 1).padStart(4, '0')}`,
+      enquiry_number: data.enquiry_number || `ENQ-${new Date().getFullYear()}-${String(Math.floor(1000 + Math.random() * 9000))}`,
       customer_id: data.customer_id || null,
       full_name: data.full_name,
       phone: data.phone,
@@ -679,10 +715,10 @@ export const CustomerSalesRepository = {
           RETURNING *;
         `;
         const res = await pool.query(sql, [
-          enquiry.id, enquiry.enquiry_number, enquiry.customer_id, enquiry.full_name, enquiry.phone,
-          enquiry.email, enquiry.source, enquiry.status, enquiry.priority, enquiry.assigned_to,
+          toValidUuidOrRandom(enquiry.id), enquiry.enquiry_number, toValidUuidOrNull(enquiry.customer_id), enquiry.full_name, enquiry.phone,
+          enquiry.email, enquiry.source, enquiry.status, enquiry.priority, toValidUuidOrNull(enquiry.assigned_to),
           enquiry.estimated_monthly_bill, enquiry.estimated_roof_area_sqft, enquiry.grid_type_preference,
-          enquiry.interested_capacity_kw, enquiry.notes, enquiry.duplicate_of_id,
+          enquiry.interested_capacity_kw, enquiry.notes, toValidUuidOrNull(enquiry.duplicate_of_id),
           enquiry.disqualification_reason, enquiry.follow_up_date, enquiry.created_at, enquiry.updated_at,
         ]);
         return res.rows[0];
@@ -853,7 +889,7 @@ export const CustomerSalesRepository = {
   async createSurvey(data) {
     const survey = {
       id: data.id || crypto.randomUUID(),
-      survey_number: data.survey_number || `SRV-${new Date().getFullYear()}-${String(fallbackStore.surveys.length + 1).padStart(4, '0')}`,
+      survey_number: data.survey_number || `SRV-${new Date().getFullYear()}-${String(Math.floor(1000 + Math.random() * 9000))}`,
       enquiry_id: data.enquiry_id,
       customer_id: data.customer_id,
       assigned_technician_id: data.assigned_technician_id || null,
@@ -962,13 +998,23 @@ export const CustomerSalesRepository = {
         let idx = 1;
         for (const [key, val] of Object.entries(updates)) {
           fields.push(`${key} = $${idx++}`);
-          values.push(val);
+          const cleanVal = (key === 'reviewed_by' || key.endsWith('_id') || key.endsWith('_by')) ? toValidUuidOrNull(val) : val;
+          values.push(cleanVal);
         }
         fields.push(`updated_at = NOW()`);
         values.push(id);
         const sql = `UPDATE site_surveys SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *;`;
         const res = await pool.query(sql, values);
-        return res.rows[0];
+        const row = res.rows[0];
+        if (row) {
+          if (row.cable_run_meters != null) row.cable_run_meters = Number(row.cable_run_meters);
+          if (row.roof_area_sqft != null) row.roof_area_sqft = Number(row.roof_area_sqft);
+          if (row.shadow_free_sqft != null) row.shadow_free_sqft = Number(row.shadow_free_sqft);
+          if (row.azimuth_degrees != null) row.azimuth_degrees = Number(row.azimuth_degrees);
+          if (row.tilt_angle_degrees != null) row.tilt_angle_degrees = Number(row.tilt_angle_degrees);
+          if (row.sanctioned_load_kw != null) row.sanctioned_load_kw = Number(row.sanctioned_load_kw);
+        }
+        return row;
       },
       async () => {
         const survey = fallbackStore.surveys.find((s) => s.id === id);
@@ -1028,14 +1074,24 @@ export const CustomerSalesRepository = {
           // Seed standard catalog if empty
           for (const pkg of SOLAR_PACKAGES) {
             await pool.query(
-              `INSERT INTO packages (id, code, name, capacity_kw, grid_type, base_price, description)
-               VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (code) DO NOTHING;`,
-              [pkg.id, pkg.code, pkg.name, pkg.capacity_kw, pkg.grid_type, pkg.base_price, pkg.description]
+              `INSERT INTO packages (code, name, capacity_kw, grid_type, base_price, description)
+               VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (code) DO NOTHING;`,
+              [pkg.code, pkg.name, pkg.capacity_kw, pkg.grid_type, pkg.base_price, pkg.description]
             );
           }
-          return SOLAR_PACKAGES;
+          const seededRes = await pool.query('SELECT * FROM packages WHERE is_active = true ORDER BY capacity_kw ASC;');
+          const rows = seededRes.rows.length > 0 ? seededRes.rows : SOLAR_PACKAGES;
+          return rows.map((r) => ({
+            ...r,
+            capacity_kw: Number(r.capacity_kw),
+            base_price: Number(r.base_price),
+          }));
         }
-        return res.rows;
+        return res.rows.map((r) => ({
+          ...r,
+          capacity_kw: Number(r.capacity_kw),
+          base_price: Number(r.base_price),
+        }));
       },
       async () => {
         return SOLAR_PACKAGES;
@@ -1054,9 +1110,10 @@ export const CustomerSalesRepository = {
   async createQuotation(data, items = []) {
     const quote = {
       id: data.id || crypto.randomUUID(),
-      quotation_number: data.quotation_number || `QTE-${new Date().getFullYear()}-${String(fallbackStore.quotations.length + 1).padStart(4, '0')}`,
+      quotation_number: data.quotation_number || `QTE-${new Date().getFullYear()}-${String(Math.floor(1000 + Math.random() * 9000))}`,
       version: data.version || 1,
-      survey_id: data.survey_id,
+      survey_id: data.survey_id || null,
+      requirements_id: data.requirements_id || null,
       customer_id: data.customer_id,
       package_id: data.package_id || null,
       capacity_kw: Number(data.capacity_kw),
@@ -1102,19 +1159,19 @@ export const CustomerSalesRepository = {
           await client.query('BEGIN');
           const sqlQuote = `
             INSERT INTO quotations (
-              id, quotation_number, version, survey_id, customer_id, package_id,
+              id, quotation_number, version, survey_id, requirements_id, customer_id, package_id,
               capacity_kw, grid_type, status, hardware_subtotal, installation_labor_cost,
               discount_amount, tax_amount, tax_percent, total_amount, subsidy_estimated_amount,
               valid_until, proposal_token, customer_notes, created_by, created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
             RETURNING *;
           `;
           const resQuote = await client.query(sqlQuote, [
-            quote.id, quote.quotation_number, quote.version, quote.survey_id, quote.customer_id,
-            quote.package_id, quote.capacity_kw, quote.grid_type, quote.status, quote.hardware_subtotal,
+            toValidUuidOrRandom(quote.id), quote.quotation_number, quote.version, toValidUuidOrNull(quote.survey_id), toValidUuidOrNull(quote.requirements_id), toValidUuidOrNull(quote.customer_id),
+            toValidUuidOrNull(quote.package_id), quote.capacity_kw, quote.grid_type, quote.status, quote.hardware_subtotal,
             quote.installation_labor_cost, quote.discount_amount, quote.tax_amount, quote.tax_percent,
             quote.total_amount, quote.subsidy_estimated_amount, quote.valid_until, quote.proposal_token,
-            quote.customer_notes, quote.created_by, quote.created_at, quote.updated_at,
+            quote.customer_notes, toValidUuidOrNull(quote.created_by), quote.created_at, quote.updated_at,
           ]);
 
           for (const it of quoteItems) {
@@ -1123,11 +1180,17 @@ export const CustomerSalesRepository = {
                 id, quotation_id, product_id, category, sku, name, quantity, unit,
                 unit_cost, unit_price, total_price, is_serialized
               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12);`,
-              [it.id, it.quotation_id, it.product_id, it.category, it.sku, it.name, it.quantity, it.unit, it.unit_cost, it.unit_price, it.total_price, it.is_serialized]
+              [toValidUuidOrRandom(it.id), toValidUuidOrRandom(it.quotation_id), toValidUuidOrNull(it.product_id), it.category, it.sku, it.name, it.quantity, it.unit, it.unit_cost, it.unit_price, it.total_price, it.is_serialized]
             );
           }
           await client.query('COMMIT');
-          return { ...resQuote.rows[0], items: quoteItems };
+          return {
+            ...resQuote.rows[0],
+            capacity_kw: Number(resQuote.rows[0].capacity_kw),
+            total_amount: Number(resQuote.rows[0].total_amount),
+            tax_percent: Number(resQuote.rows[0].tax_percent),
+            items: quoteItems,
+          };
         } catch (err) {
           await client.query('ROLLBACK');
           throw err;
@@ -1147,9 +1210,25 @@ export const CustomerSalesRepository = {
     return executeDb(
       async () => {
         const res = await pool.query('SELECT * FROM quotations WHERE id = $1;', [id]);
-        if (!res.rows[0]) return null;
+        if (!res.rows[0]) {
+          const q = fallbackStore.quotations.find((item) => item.id === id);
+          if (!q) return null;
+          const items = fallbackStore.quotationItems.filter((it) => it.quotation_id === id);
+          return { ...q, items };
+        }
         const itemsRes = await pool.query('SELECT * FROM quotation_items WHERE quotation_id = $1;', [id]);
-        return { ...res.rows[0], items: itemsRes.rows };
+        return {
+          ...res.rows[0],
+          capacity_kw: Number(res.rows[0].capacity_kw),
+          total_amount: Number(res.rows[0].total_amount),
+          tax_percent: Number(res.rows[0].tax_percent),
+          items: itemsRes.rows.map((it) => ({
+            ...it,
+            quantity: Number(it.quantity),
+            unit_price: Number(it.unit_price),
+            total_price: Number(it.total_price),
+          })),
+        };
       },
       async () => {
         const q = fallbackStore.quotations.find((item) => item.id === id);
@@ -1164,9 +1243,25 @@ export const CustomerSalesRepository = {
     return executeDb(
       async () => {
         const res = await pool.query('SELECT * FROM quotations WHERE proposal_token = $1;', [token]);
-        if (!res.rows[0]) return null;
+        if (!res.rows[0]) {
+          const q = fallbackStore.quotations.find((item) => item.proposal_token === token);
+          if (!q) return null;
+          const items = fallbackStore.quotationItems.filter((it) => it.quotation_id === q.id);
+          return { ...q, items };
+        }
         const itemsRes = await pool.query('SELECT * FROM quotation_items WHERE quotation_id = $1;', [res.rows[0].id]);
-        return { ...res.rows[0], items: itemsRes.rows };
+        return {
+          ...res.rows[0],
+          capacity_kw: Number(res.rows[0].capacity_kw),
+          total_amount: Number(res.rows[0].total_amount),
+          tax_percent: Number(res.rows[0].tax_percent),
+          items: itemsRes.rows.map((it) => ({
+            ...it,
+            quantity: Number(it.quantity),
+            unit_price: Number(it.unit_price),
+            total_price: Number(it.total_price),
+          })),
+        };
       },
       async () => {
         const q = fallbackStore.quotations.find((item) => item.proposal_token === token);
@@ -1218,7 +1313,26 @@ export const CustomerSalesRepository = {
         values.push(id);
         const sql = `UPDATE quotations SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *;`;
         const res = await pool.query(sql, values);
-        return res.rows[0];
+        if (!res.rows[0]) {
+          const q = fallbackStore.quotations.find((item) => item.id === id);
+          if (!q) return null;
+          Object.assign(q, updates, { updated_at: new Date().toISOString() });
+          const items = fallbackStore.quotationItems.filter((it) => it.quotation_id === id);
+          return { ...q, items };
+        }
+        const itemsRes = await pool.query('SELECT * FROM quotation_items WHERE quotation_id = $1;', [res.rows[0].id]);
+        return {
+          ...res.rows[0],
+          capacity_kw: Number(res.rows[0].capacity_kw),
+          total_amount: Number(res.rows[0].total_amount),
+          tax_percent: Number(res.rows[0].tax_percent),
+          items: itemsRes.rows.map((it) => ({
+            ...it,
+            quantity: Number(it.quantity),
+            unit_price: Number(it.unit_price),
+            total_price: Number(it.total_price),
+          })),
+        };
       },
       async () => {
         const q = fallbackStore.quotations.find((item) => item.id === id);
@@ -1240,7 +1354,7 @@ export const CustomerSalesRepository = {
 
     const order = {
       id: crypto.randomUUID(),
-      order_number: `ORD-${new Date().getFullYear()}-${String(fallbackStore.orders.length + 1).padStart(4, '0')}`,
+      order_number: `ORD-${new Date().getFullYear()}-${String(Math.floor(1000 + Math.random() * 9000))}`,
       quotation_id: quotation.id,
       customer_id: quotation.customer_id,
       order_status: 'CONFIRMED',
@@ -1255,7 +1369,7 @@ export const CustomerSalesRepository = {
 
     const project = {
       id: crypto.randomUUID(),
-      project_number: `PRJ-${new Date().getFullYear()}-${String(fallbackStore.projects.length + 1).padStart(4, '0')}`,
+      project_number: `PRJ-${new Date().getFullYear()}-${String(Math.floor(1000 + Math.random() * 9000))}`,
       order_id: order.id,
       customer_id: quotation.customer_id,
       capacity_kw: Number(quotation.capacity_kw),
@@ -1299,9 +1413,9 @@ export const CustomerSalesRepository = {
             RETURNING *;
           `;
           const resOrder = await client.query(sqlOrder, [
-            order.id, order.order_number, order.quotation_id, order.customer_id, order.order_status,
+            toValidUuidOrRandom(order.id), order.order_number, toValidUuidOrNull(order.quotation_id), toValidUuidOrNull(order.customer_id), order.order_status,
             order.payment_status, order.total_contract_value, order.advance_required_percent,
-            order.advance_required_amount, order.created_by, order.created_at, order.updated_at,
+            order.advance_required_amount, toValidUuidOrNull(order.created_by), order.created_at, order.updated_at,
           ]);
 
           // 2. Insert project
@@ -1313,7 +1427,7 @@ export const CustomerSalesRepository = {
             RETURNING *;
           `;
           const resProj = await client.query(sqlProj, [
-            project.id, project.project_number, project.order_id, project.customer_id,
+            toValidUuidOrRandom(project.id), project.project_number, toValidUuidOrNull(project.order_id), toValidUuidOrNull(project.customer_id),
             project.capacity_kw, project.grid_type, project.current_stage,
             project.created_at, project.updated_at,
           ]);
@@ -1326,7 +1440,7 @@ export const CustomerSalesRepository = {
                 quantity, unit, unit_cost, unit_price, total_price, is_serialized, created_at
               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);`,
               [
-                item.id, item.project_id, item.order_id, item.product_id, item.category,
+                toValidUuidOrRandom(item.id), toValidUuidOrNull(item.project_id), toValidUuidOrNull(item.order_id), toValidUuidOrNull(item.product_id), item.category,
                 item.sku, item.name, item.quantity, item.unit, item.unit_cost, item.unit_price,
                 item.total_price, item.is_serialized, item.created_at,
               ]
@@ -1334,7 +1448,24 @@ export const CustomerSalesRepository = {
           }
 
           await client.query('COMMIT');
-          return { order: resOrder.rows[0], project: resProj.rows[0], bomItems };
+          return {
+            order: {
+              ...resOrder.rows[0],
+              total_contract_value: Number(resOrder.rows[0].total_contract_value),
+              advance_required_percent: Number(resOrder.rows[0].advance_required_percent),
+              advance_required_amount: Number(resOrder.rows[0].advance_required_amount),
+            },
+            project: {
+              ...resProj.rows[0],
+              capacity_kw: Number(resProj.rows[0].capacity_kw),
+            },
+            bomItems: bomItems.map(b => ({
+              ...b,
+              quantity: Number(b.quantity),
+              unit_price: Number(b.unit_price),
+              total_price: Number(b.total_price),
+            })),
+          };
         } catch (err) {
           await client.query('ROLLBACK');
           throw err;
@@ -1438,10 +1569,424 @@ export const CustomerSalesRepository = {
           'SELECT * FROM project_bom_items WHERE project_id = $1 ORDER BY created_at ASC;',
           [projectId]
         );
-        return res.rows;
+        return res.rows.map((b) => ({
+          ...b,
+          quantity: Number(b.quantity),
+          unit_cost: Number(b.unit_cost),
+          unit_price: Number(b.unit_price),
+          total_price: Number(b.total_price),
+        }));
       },
       async () => {
         return fallbackStore.projectBomItems.filter((b) => b.project_id === projectId);
+      }
+    );
+  },
+
+  async saveInstallationRequirements(customerId, data, userId = null) {
+    const cleanUserId = toValidUuidOrNull(userId);
+    return executeDb(
+      async () => {
+        const checkRes = await pool.query(
+          'SELECT id FROM customer_installation_requirements WHERE customer_id = $1 LIMIT 1;',
+          [customerId]
+        );
+
+        let resultRow;
+        if (checkRes.rows.length > 0) {
+          const reqId = checkRes.rows[0].id;
+          const updateRes = await pool.query(
+            `UPDATE customer_installation_requirements
+             SET property_type = COALESCE($1, property_type),
+                 ownership_status = COALESCE($2, ownership_status),
+                 installation_location = COALESCE($3, installation_location),
+                 roof_type = COALESCE($4, roof_type),
+                 roof_area_sqft = COALESCE($5, roof_area_sqft),
+                 floors_count = COALESCE($6, floors_count),
+                 roof_restrictions = $7,
+                 electricity_consumer_number = COALESCE($8, electricity_consumer_number),
+                 discom_name = $9,
+                 avg_monthly_bill = $10,
+                 monthly_units = $11,
+                 connection_type = COALESCE($12, connection_type),
+                 existing_meter_details = $13,
+                 preferred_system_type = COALESCE($14, preferred_system_type),
+                 required_capacity_kw = COALESCE($15, required_capacity_kw),
+                 installation_purpose = $16,
+                 preferred_timeline = COALESCE($17, preferred_timeline),
+                 battery_required = COALESCE($18, battery_required),
+                 full_installation_address = COALESCE($19, full_installation_address),
+                 parking_access = $20,
+                 roof_accessibility = $21,
+                 nearby_obstacles = $22,
+                 special_requirements = $23,
+                 documents_json = COALESCE($24, documents_json),
+                 status = 'SUBMITTED',
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $25
+             RETURNING *;`,
+            [
+              data.propertyType,
+              data.ownershipStatus,
+              data.installationLocation,
+              data.roofType,
+              data.roofAreaSqft ? parseFloat(data.roofAreaSqft) : null,
+              data.floorsCount ? parseInt(data.floorsCount, 10) : 1,
+              data.roofRestrictions || null,
+              data.electricityConsumerNumber || null,
+              data.discomName || null,
+              data.avgMonthlyBill ? parseFloat(data.avgMonthlyBill) : null,
+              data.monthlyUnits ? parseFloat(data.monthlyUnits) : null,
+              data.connectionType || 'Single Phase',
+              data.existingMeterDetails || null,
+              data.preferredSystemType || 'On-Grid',
+              data.requiredCapacityKw ? parseFloat(data.requiredCapacityKw) : 3.0,
+              data.installationPurpose || null,
+              data.preferredTimeline || 'Immediate (Within 1 Month)',
+              data.batteryRequired || 'No',
+              data.fullInstallationAddress,
+              data.parkingAccess || null,
+              data.roofAccessibility || null,
+              data.nearbyObstacles || null,
+              data.specialRequirements || null,
+              data.documentsJson ? JSON.stringify(data.documentsJson) : null,
+              reqId,
+            ]
+          );
+          resultRow = updateRes.rows[0];
+        } else {
+          const insertRes = await pool.query(
+            `INSERT INTO customer_installation_requirements (
+               customer_id, user_id, property_type, ownership_status, installation_location,
+               roof_type, roof_area_sqft, floors_count, roof_restrictions,
+               electricity_consumer_number, discom_name, avg_monthly_bill, monthly_units,
+               connection_type, existing_meter_details, preferred_system_type,
+               required_capacity_kw, installation_purpose, preferred_timeline, battery_required,
+               full_installation_address, parking_access, roof_accessibility,
+               nearby_obstacles, special_requirements, documents_json, status
+             ) VALUES (
+               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+               $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, 'SUBMITTED'
+             ) RETURNING *;`,
+            [
+              customerId,
+              cleanUserId,
+              data.propertyType || 'Residential',
+              data.ownershipStatus || 'Owned',
+              data.installationLocation || 'Rooftop',
+              data.roofType || 'RCC Flat',
+              data.roofAreaSqft ? parseFloat(data.roofAreaSqft) : null,
+              data.floorsCount ? parseInt(data.floorsCount, 10) : 1,
+              data.roofRestrictions || null,
+              data.electricityConsumerNumber || null,
+              data.discomName || null,
+              data.avgMonthlyBill ? parseFloat(data.avgMonthlyBill) : null,
+              data.monthlyUnits ? parseFloat(data.monthlyUnits) : null,
+              data.connectionType || 'Single Phase',
+              data.existingMeterDetails || null,
+              data.preferredSystemType || 'On-Grid',
+              data.requiredCapacityKw ? parseFloat(data.requiredCapacityKw) : 3.0,
+              data.installationPurpose || null,
+              data.preferredTimeline || 'Immediate (Within 1 Month)',
+              data.batteryRequired || 'No',
+              data.fullInstallationAddress,
+              data.parkingAccess || null,
+              data.roofAccessibility || null,
+              data.nearbyObstacles || null,
+              data.specialRequirements || null,
+              JSON.stringify(data.documentsJson || {}),
+            ]
+          );
+          resultRow = insertRes.rows[0];
+        }
+
+        // Also update customer profile with key fields
+        await pool.query(
+          `UPDATE customers
+           SET installation_location = COALESCE($1, installation_location),
+               required_capacity_kw = COALESCE($2, required_capacity_kw),
+               electricity_consumer_number = COALESCE($3, electricity_consumer_number),
+               sanctioned_load_kw = COALESCE($4, sanctioned_load_kw),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $5;`,
+          [
+            data.installationLocation,
+            data.requiredCapacityKw ? parseFloat(data.requiredCapacityKw) : null,
+            data.electricityConsumerNumber,
+            data.requiredCapacityKw ? parseFloat(data.requiredCapacityKw) : null,
+            customerId,
+          ]
+        );
+
+        // Timeline entry
+        await pool.query(
+          `INSERT INTO customer_timeline (
+             customer_id, event_type, title, description, metadata, created_by
+           ) VALUES ($1, 'REQUIREMENTS_SUBMITTED', 'Installation Requirements Submitted', $2, $3, $4);`,
+          [
+            customerId,
+            `Customer submitted comprehensive solar installation details for ${data.requiredCapacityKw || 3} kW system.`,
+            JSON.stringify({ propertyType: data.propertyType, capacity: data.requiredCapacityKw, status: 'SUBMITTED' }),
+            cleanUserId,
+          ]
+        );
+
+        return resultRow;
+      },
+      async () => {
+        let req = fallbackStore.installationRequirements.find((r) => r.customer_id === customerId);
+        if (!req) {
+          req = {
+            id: `req-${Date.now()}`,
+            customer_id: customerId,
+            user_id: userId,
+            created_at: new Date().toISOString(),
+          };
+          fallbackStore.installationRequirements.push(req);
+        }
+        Object.assign(req, data, { status: 'SUBMITTED', updated_at: new Date().toISOString() });
+        return req;
+      }
+    );
+  },
+
+  async getInstallationRequirementsByCustomerId(customerId) {
+    return executeDb(
+      async () => {
+        const res = await pool.query(
+          `SELECT r.*, c.full_name as customer_name, c.customer_code, c.phone, c.email,
+                  p.id AS project_id, p.project_code, p.workflow_stage, p.current_stage,
+                  o.id AS order_id, o.order_number, o.order_status, o.payment_status
+           FROM customer_installation_requirements r
+           JOIN customers c ON c.id = r.customer_id
+           LEFT JOIN projects p ON p.customer_id = c.id
+           LEFT JOIN orders o ON o.customer_id = c.id
+           WHERE r.customer_id = $1
+           ORDER BY r.created_at DESC LIMIT 1;`,
+          [customerId]
+        );
+        return res.rows[0] || null;
+      },
+      async () => {
+        return fallbackStore.installationRequirements.find((r) => r.customer_id === customerId) || null;
+      }
+    );
+  },
+
+  async getInstallationRequirementsByUserId(userId) {
+    return executeDb(
+      async () => {
+        const res = await pool.query(
+          `SELECT r.*, c.full_name as customer_name, c.customer_code, c.phone, c.email,
+                  c.assigned_technician_id, c.assigned_warehouse_id, c.assigned_support_id,
+                  p.id AS project_id, p.project_code, p.workflow_stage, p.current_stage,
+                  o.id AS order_id, o.order_number, o.order_status, o.payment_status
+           FROM customer_installation_requirements r
+           JOIN customers c ON c.id = r.customer_id
+           LEFT JOIN projects p ON p.customer_id = c.id
+           LEFT JOIN orders o ON o.customer_id = c.id
+           WHERE r.user_id = $1 OR c.user_id = $1
+           ORDER BY r.created_at DESC LIMIT 1;`,
+          [userId]
+        );
+        return res.rows[0] || null;
+      },
+      async () => {
+        return fallbackStore.installationRequirements.find((r) => r.user_id === userId) || null;
+      }
+    );
+  },
+
+  async listInstallationRequirements({ status = null, customerId = null } = {}) {
+    return executeDb(
+      async () => {
+        const conditions = [];
+        const params = [];
+
+        if (status) {
+          params.push(status);
+          conditions.push(`r.status = $${params.length}`);
+        }
+        if (customerId) {
+          params.push(customerId);
+          conditions.push(`r.customer_id = $${params.length}`);
+        }
+
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+        const res = await pool.query(
+          `SELECT r.*, c.full_name as customer_name, c.customer_code, c.phone, c.email,
+                  c.assigned_technician_id, c.assigned_warehouse_id, c.assigned_support_id,
+                  p.id AS project_id, p.project_code, p.workflow_stage, p.current_stage,
+                  o.id AS order_id, o.order_number
+           FROM customer_installation_requirements r
+           JOIN customers c ON c.id = r.customer_id
+           LEFT JOIN projects p ON p.customer_id = c.id
+           LEFT JOIN orders o ON o.customer_id = c.id
+           ${whereClause}
+           ORDER BY r.created_at DESC;`,
+          params
+        );
+        return res.rows;
+      },
+      async () => {
+        let list = [...fallbackStore.installationRequirements];
+        if (status) list = list.filter((r) => r.status === status);
+        if (customerId) list = list.filter((r) => r.customer_id === customerId);
+        return list;
+      }
+    );
+  },
+
+  async reviewInstallationRequirements(requirementsId, reviewDataOrStatus, maybeAdminNotes = null, adminUserId = null) {
+    let status;
+    let adminNotes = null;
+    let adminId = adminUserId;
+
+    if (typeof reviewDataOrStatus === 'object' && reviewDataOrStatus !== null) {
+      status = reviewDataOrStatus.status;
+      adminNotes = reviewDataOrStatus.adminNotes || null;
+    } else {
+      status = reviewDataOrStatus;
+      adminNotes = maybeAdminNotes;
+    }
+
+    const cleanAdmin = toValidUuidOrNull(adminId);
+    return executeDb(
+      async () => {
+        const updateRes = await pool.query(
+          `UPDATE customer_installation_requirements
+           SET status = $1,
+               admin_notes = $2,
+               reviewed_by = $3,
+               reviewed_at = CURRENT_TIMESTAMP,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $4 OR customer_id = $4
+           RETURNING *;`,
+          [status, adminNotes, cleanAdmin, requirementsId]
+        );
+
+        if (updateRes.rows.length === 0) return null;
+        const req = updateRes.rows[0];
+
+        // 2. AUTOMATIC PROJECT ID AND ORDER ID GENERATION ON APPROVAL
+        let project = null;
+        let order = null;
+
+        if (status === 'APPROVED') {
+          // Check if project already exists for this customer or requirement
+          const existingProjRes = await pool.query(
+            `SELECT p.*, o.order_number 
+             FROM projects p 
+             LEFT JOIN orders o ON p.order_id = o.id 
+             WHERE p.customer_id = $1 OR p.requirements_id = $2 
+             LIMIT 1;`,
+            [req.customer_id, req.id]
+          );
+
+          if (existingProjRes.rows.length > 0) {
+            project = existingProjRes.rows[0];
+          } else {
+            // Generate unique Order ID (ORD-YYYY-XXXX)
+            const orderCode = 'ORD-' + new Date().getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000);
+            const contractVal = (Number(req.required_capacity_kw) || 3.0) * 55000;
+            const advanceAmt = contractVal * 0.25;
+
+            const orderRes = await pool.query(
+              `INSERT INTO orders (
+                order_number, customer_id, order_status, payment_status,
+                total_contract_value, advance_required_percent, advance_required_amount,
+                advance_paid_amount, requirements_id
+              ) VALUES ($1, $2, 'CONFIRMED', 'PENDING_ADVANCE', $3, 25.0, $4, 0, $5)
+              RETURNING *;`,
+              [orderCode, req.customer_id, contractVal, advanceAmt, req.id]
+            );
+            order = orderRes.rows[0];
+
+            // Generate unique Project ID (PRJ-YYYY-XXXX)
+            const projectCode = 'PRJ-' + new Date().getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000);
+            const projectRes = await pool.query(
+              `INSERT INTO projects (
+                project_code, project_number, order_id, customer_id, capacity_kw, grid_type,
+                current_stage, workflow_stage, requirements_id
+              ) VALUES ($1, $1, $2, $3, $4, $5, 'QUOTATION_PENDING', 'REQUIREMENTS_VERIFIED', $6)
+              RETURNING *;`,
+              [
+                projectCode,
+                order.id,
+                req.customer_id,
+                Number(req.required_capacity_kw) || 3.0,
+                req.preferred_system_type || 'On-Grid',
+                req.id
+              ]
+            );
+            project = projectRes.rows[0];
+            project.order_number = orderCode;
+          }
+
+          // Trigger database-backed notifications
+          if (req.user_id) {
+            await pool.query(
+              `INSERT INTO notifications (user_id, role, title, message, type, link)
+               VALUES ($1, 'Customer', 'Solar Requirements Approved!', $2, 'SUCCESS', 'dashboard');`,
+              [
+                req.user_id,
+                `Requirements approved! Project ID: ${project.project_code}, Order ID: ${project.order_number}. Warehouse is preparing your custom quotation.`
+              ]
+            );
+          }
+
+          await pool.query(
+            `INSERT INTO notifications (role, title, message, type, link)
+             VALUES ('Warehouse', 'New Project Assigned for Quotation', $1, 'INFO', 'inventory');`,
+            [
+              `Project ${project.project_code} (${req.required_capacity_kw || 3} kW) approved. Please prepare itemized BOM quotation.`
+            ]
+          );
+        }
+
+        // Record customer timeline event
+        const eventTitle = status === 'APPROVED' ? 'Requirements Approved & IDs Assigned'
+          : (status === 'CHANGES_REQUESTED' ? 'Requirements Changes Requested' : 'Requirements Rejected');
+
+        const eventDesc = status === 'APPROVED'
+          ? `Solar installation requirements approved. Project ID: ${project?.project_code || 'PRJ-NEW'}, Order ID: ${project?.order_number || 'ORD-NEW'}. Forwarded to Warehouse for Quotation Preparation. ${adminNotes ? 'Admin Note: ' + adminNotes : ''}`
+          : `Admin review status: ${status}. ${adminNotes ? 'Note: ' + adminNotes : ''}`;
+
+        await pool.query(
+          `INSERT INTO customer_timeline (
+             customer_id, event_type, title, description, metadata, created_by
+           ) VALUES ($1, $2, $3, $4, $5, $6);`,
+          [
+            req.customer_id,
+            `REQUIREMENTS_${status}`,
+            eventTitle,
+            eventDesc,
+            JSON.stringify({ 
+              status, 
+              adminNotes, 
+              requirementsId, 
+              projectId: project?.id, 
+              projectCode: project?.project_code, 
+              orderNumber: project?.order_number 
+            }),
+            cleanAdmin,
+          ]
+        );
+
+        req.project_code = project?.project_code;
+        req.order_number = project?.order_number;
+        req.project_id = project?.id;
+        return req;
+      },
+      async () => {
+        const req = fallbackStore.installationRequirements.find((r) => r.id === requirementsId || r.customer_id === requirementsId);
+        if (req) {
+          req.status = status;
+          req.admin_notes = adminNotes;
+          req.reviewed_by = cleanAdmin;
+          req.reviewed_at = new Date().toISOString();
+        }
+        return req;
       }
     );
   },

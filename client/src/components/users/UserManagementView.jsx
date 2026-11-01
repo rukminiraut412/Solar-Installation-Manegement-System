@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 
 const ALLOWED_EMPLOYEE_ROLES = [
-  { value: 'Sales', label: 'Sales / Seller Representative' },
   { value: 'Warehouse', label: 'Warehouse Manager' },
   { value: 'Technician', label: 'Field Installation Technician' },
   { value: 'Support', label: 'Customer Support Executive' },
@@ -33,7 +32,7 @@ export default function UserManagementView() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('Sales');
+  const [role, setRole] = useState('Technician');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchUsers = async () => {
@@ -73,7 +72,7 @@ export default function UserManagementView() {
       setEmail('');
       setPhone('');
       setPassword('');
-      setRole('Sales');
+      setRole('Technician');
       setShowAddForm(false);
       fetchUsers();
     } catch (err) {
@@ -128,7 +127,7 @@ export default function UserManagementView() {
             Employee &amp; Partner User Management
           </h1>
           <p className="text-xs text-slate-600 mt-1">
-            Provision and control access for Support, Warehouse, Technician, and Sales employees.
+            Provision and control access for Support, Warehouse, and Technician employees.
           </p>
         </div>
 
@@ -172,7 +171,7 @@ export default function UserManagementView() {
             Provision New Employee Account
           </h2>
           <p className="text-xs text-slate-600 mb-4">
-            Only administrators can authorize and provision non-public roles (Support, Warehouse, Technician, Sales).
+            Only administrators can authorize and provision non-public roles (Support, Warehouse, Technician).
           </p>
 
           <form onSubmit={handleCreateUser} className="space-y-4">

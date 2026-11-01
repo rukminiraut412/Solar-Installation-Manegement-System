@@ -136,7 +136,7 @@ export const DispatchService = {
           category: item.category,
           quantity: item.quantityReserved,
           unit: item.unit,
-          isSerialized: item.isSerialized
+          isSerialized: item.is_serialized ?? item.isSerialized ?? false,
         });
       }
     }
@@ -197,7 +197,7 @@ export const DispatchService = {
       if (item.isSerialized) {
         const scannedCount = dispatch.scannedSerials.filter(sn => {
           const s = store.serialItems.get(sn);
-          return s && s.productId === item.productId;
+          return s && (s.productId === item.productId || (s.sku && item.sku && s.sku.toUpperCase() === item.sku.toUpperCase()));
         }).length;
 
         if (scannedCount < item.quantity) {
@@ -224,7 +224,7 @@ export const DispatchService = {
     // Atomic Inventory Decrement
     const timestamp = new Date().toISOString();
     for (const item of dispatch.items) {
-      const inv = store.inventory.get(item.productId);
+      const inv = (item.sku && store.inventory.get(item.sku)) || store.inventory.get(item.productId);
       if (inv) {
         inv.onHandQuantity = Math.max(0, inv.onHandQuantity - item.quantity);
         inv.reservedQuantity = Math.max(0, inv.reservedQuantity - item.quantity);

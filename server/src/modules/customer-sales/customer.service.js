@@ -6,6 +6,8 @@
 
 import { CustomerSalesRepository } from './customer-sales.repository.js';
 import { AppError, NotFoundError, ForbiddenError } from '../../shared/errors/AppError.js';
+import { pool } from '../../db/index.js';
+import { WarehouseQuotationService } from '../operations/warehouse-quotation.service.js';
 
 export const CustomerService = {
   /**
@@ -69,7 +71,12 @@ export const CustomerService = {
 
     // STRICT RBAC & DATA PRIVACY GUARD (PHASE 4)
     if (user && user.role !== 'Admin/Owner') {
-      const isSalesAuthorized = user.role === 'Sales' && (customer.assigned_seller_id === user.id || customer.created_by === user.id);
+      const isSalesAuthorized = user.role === 'Sales' && (
+        customer.assigned_seller_id === user.id ||
+        customer.created_by === user.id ||
+        (!customer.assigned_seller_id && !customer.created_by) ||
+        customer.assignment_status === 'PENDING_ASSIGNMENT'
+      );
       const isTechAuthorized = user.role === 'Technician' && customer.assigned_technician_id === user.id;
       const isWarehouseAuthorized = user.role === 'Warehouse' && customer.assigned_warehouse_id === user.id;
       const isSupportAuthorized = user.role === 'Support' && customer.assigned_support_id === user.id;
@@ -81,17 +88,13 @@ export const CustomerService = {
 
     const timeline = await CustomerSalesRepository.getTimelineByCustomerId(id);
     const assignments = await CustomerSalesRepository.getCustomerAssignmentHistory(id);
-    const enquiries = await CustomerSalesRepository.listEnquiries({ search: customer.phone });
-    const quotations = await CustomerSalesRepository.listQuotations({ customer_id: id });
-    const orders = await CustomerSalesRepository.listOrders({ customer_id: id });
+    const requirements = await CustomerSalesRepository.getInstallationRequirementsByCustomerId(id);
 
     return {
       customer,
       timeline,
       assignments,
-      enquiries,
-      quotations,
-      orders,
+      requirements,
     };
   },
 
@@ -190,6 +193,184 @@ export const CustomerService = {
    */
   async getCustomerTimeline(customerId) {
     return CustomerSalesRepository.getTimelineByCustomerId(customerId);
+  },
+
+  /**
+   * Save / Submit detailed installation requirements
+   */
+  async saveRequirements(data, user) {
+    let customerId = data.customerId;
+    if (user?.role === 'Customer' || !customerId) {
+      // Find customer linked to current user
+      const existingReq = await CustomerSalesRepository.getInstallationRequirementsByUserId(user.id);
+      if (existingReq) {
+        customerId = existingReq.customer_id;
+      } else {
+        const custList = await CustomerSalesRepository.listCustomers({ search: user.email });
+        if (custList.length > 0) {
+          customerId = custList[0].id;
+        } else {
+          throw new NotFoundError('Customer record not found for authenticated user');
+        }
+      }
+    }
+
+    const saved = await CustomerSalesRepository.saveInstallationRequirements(customerId, data, user?.id);
+
+    // Automatically trigger visibility in assigned Warehouse Portal & generate Draft Quotation
+    await this.processRequirementsSubmission(saved, customerId, user);
+
+    return saved;
+  },
+
+  /**
+   * Automatically process requirements submission:
+   * 1. Ensure customer is assigned to active Warehouse
+   * 2. Generate Project ID & Order ID using existing process
+   * 3. Automatically generate itemized BOM draft quotation in assigned Warehouse Portal
+   */
+  async processRequirementsSubmission(savedReq, customerId, user) {
+    try {
+      // 1. Ensure customer is assigned to a warehouse
+      const custRes = await pool.query('SELECT * FROM customers WHERE id = $1;', [customerId]);
+      if (custRes.rows.length === 0) return;
+      const customer = custRes.rows[0];
+
+      let warehouseId = customer.assigned_warehouse_id;
+      if (!warehouseId) {
+        const whRes = await pool.query(
+          "SELECT id FROM users WHERE role = 'Warehouse' AND is_active = true ORDER BY created_at ASC LIMIT 1;"
+        );
+        if (whRes.rows.length > 0) {
+          warehouseId = whRes.rows[0].id;
+          await pool.query(
+            "UPDATE customers SET assigned_warehouse_id = $1, assignment_status = 'ASSIGNED', assigned_at = CURRENT_TIMESTAMP WHERE id = $2;",
+            [warehouseId, customerId]
+          );
+          await pool.query(
+            "INSERT INTO customer_assignments (customer_id, assigned_by, warehouse_id, assignment_notes) VALUES ($1, $2, $3, 'Auto-assigned to Warehouse on Requirements Submission');",
+            [customerId, user?.id || null, warehouseId]
+          );
+        }
+      }
+
+      // 2. Generate Project ID & Order ID using existing process if not yet created
+      let project = null;
+      let order = null;
+
+      const existingProjRes = await pool.query(
+        `SELECT p.*, o.order_number 
+         FROM projects p 
+         LEFT JOIN orders o ON p.order_id = o.id 
+         WHERE p.customer_id = $1 OR p.requirements_id = $2 
+         LIMIT 1;`,
+        [customerId, savedReq.id]
+      );
+
+      if (existingProjRes.rows.length > 0) {
+        project = existingProjRes.rows[0];
+        if (project.order_id) {
+          const orderRes = await pool.query('SELECT * FROM orders WHERE id = $1;', [project.order_id]);
+          order = orderRes.rows[0] || null;
+        }
+      } else {
+        // Generate unique Order ID (ORD-YYYY-XXXX)
+        const orderCode = 'ORD-' + new Date().getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000);
+        const contractVal = (Number(savedReq.required_capacity_kw) || 3.0) * 55000;
+        const advanceAmt = contractVal * 0.25;
+
+        const orderRes = await pool.query(
+          `INSERT INTO orders (
+            order_number, customer_id, order_status, payment_status,
+            total_contract_value, advance_required_percent, advance_required_amount,
+            advance_paid_amount, requirements_id
+          ) VALUES ($1, $2, 'CONFIRMED', 'PENDING_ADVANCE', $3, 25.0, $4, 0, $5)
+          RETURNING *;`,
+          [orderCode, customerId, contractVal, advanceAmt, savedReq.id]
+        );
+        order = orderRes.rows[0];
+
+        // Generate unique Project ID (PRJ-YYYY-XXXX)
+        const projectCode = 'PRJ-' + new Date().getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000);
+        const projectRes = await pool.query(
+          `INSERT INTO projects (
+            project_code, project_number, order_id, customer_id, capacity_kw, grid_type,
+            current_stage, workflow_stage, requirements_id
+          ) VALUES ($1, $1, $2, $3, $4, $5, 'QUOTATION_PENDING', 'REQUIREMENTS_SUBMITTED', $6)
+          RETURNING *;`,
+          [
+            projectCode,
+            order.id,
+            customerId,
+            Number(savedReq.required_capacity_kw) || 3.0,
+            savedReq.preferred_system_type || 'On-Grid',
+            savedReq.id
+          ]
+        );
+        project = projectRes.rows[0];
+        project.order_number = orderCode;
+      }
+
+      // 3. Auto-generate draft quotation in assigned Warehouse Portal
+      await WarehouseQuotationService.autoGenerateDraftQuotation({
+        requirement: savedReq,
+        customerId,
+        projectId: project.id,
+        orderId: order?.id || null,
+        warehouseId,
+        userId: user?.id || null
+      });
+    } catch (procErr) {
+      console.error('[Requirements Processing Error]', procErr);
+    }
+  },
+
+  /**
+   * Get installation requirements for current logged-in customer
+   */
+  async getMyRequirements(user) {
+    const req = await CustomerSalesRepository.getInstallationRequirementsByUserId(user.id);
+    if (!req) {
+      // Check if customer exists without requirements yet
+      const custList = await CustomerSalesRepository.listCustomers({ search: user.email });
+      if (custList.length > 0) {
+        const cust = custList[0];
+        return {
+          customer_id: cust.id,
+          customer_name: cust.full_name,
+          customer_code: cust.customer_code,
+          full_installation_address: cust.address_street || '',
+          required_capacity_kw: cust.required_capacity_kw || 3.0,
+          status: 'DRAFT',
+        };
+      }
+    }
+    return req;
+  },
+
+  /**
+   * Get installation requirements for a specific customer
+   */
+  async getCustomerRequirements(customerId) {
+    return CustomerSalesRepository.getInstallationRequirementsByCustomerId(customerId);
+  },
+
+  /**
+   * List requirements for Admin / Warehouse review
+   */
+  async listRequirements(filter = {}) {
+    return CustomerSalesRepository.listInstallationRequirements(filter);
+  },
+
+  /**
+   * Admin Review of Installation Requirements (Approve / Reject / Changes Requested)
+   */
+  async reviewRequirements(requirementsId, { status, adminNotes }, adminUser) {
+    const req = await CustomerSalesRepository.reviewInstallationRequirements(requirementsId, { status, adminNotes }, adminUser.id);
+    if (!req) {
+      throw new NotFoundError('Requirements record not found');
+    }
+    return req;
   },
 };
 

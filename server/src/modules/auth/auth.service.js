@@ -252,10 +252,9 @@ export class AuthService {
   }
 
   /**
-   * Public Seller Registration - Strictly defaults role to Sales
-   * Never trusts client-supplied roles.
+   * Public Seller / Partner Registration - Enforces Sales role
    */
-  static async registerSeller({ fullName, email, password, phone = null, businessName = null, address = null }) {
+  static async registerSeller({ fullName, email, password, phone, businessName, address }) {
     const normalizedEmail = email.toLowerCase().trim();
 
     const existing = await db.query(
@@ -268,34 +267,196 @@ export class AuthService {
     }
 
     const passwordHash = await hashPassword(password);
-    // STRICT SECURITY: Public registration is locked to ROLES.SALES
     const role = ROLES.SALES;
 
-    const res = await db.query(
+    const userRes = await db.query(
       `INSERT INTO users (email, password_hash, full_name, role, phone)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id, email, full_name, role, phone, is_active, created_at;`,
       [normalizedEmail, passwordHash, fullName, role, phone]
     );
 
-    const newUser = res.rows[0];
+    const newUser = userRes.rows[0];
 
     await recordAuditLog({
       userId: newUser.id,
       action: 'PUBLIC_SELLER_REGISTERED',
-      entity: 'USER',
+      entity: 'AUTH',
       entityId: newUser.id,
+      newValues: { email: newUser.email, role: newUser.role, businessName, address },
+    });
+
+    const accessToken = signAccessToken(newUser);
+    const refreshToken = signRefreshToken(newUser);
+
+    const tokenHash = hashToken(refreshToken);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    await db.query(
+      `INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+       VALUES ($1, $2, $3);`,
+      [newUser.id, tokenHash, expiresAt]
+    );
+
+    return {
+      id: newUser.id,
+      email: newUser.email,
+      fullName: newUser.full_name,
+      role: newUser.role,
+      phone: newUser.phone,
+      isActive: newUser.is_active,
+      createdAt: newUser.created_at,
+    };
+  }
+
+  /**
+   * Public Customer Registration - Strictly sets role to Customer
+   * Automatically creates user record and linked customer profile with installation requirement
+   */
+  static async registerCustomer({
+    fullName,
+    email,
+    password,
+    phone,
+    addressStreet = null,
+    addressCity = 'Ahmedabad',
+    addressState = 'Gujarat',
+    addressPincode = null,
+    installationLocation = null,
+    solarRequirement = 'Residential',
+    requiredCapacityKw = 3.0,
+    electricityConsumerNumber = null,
+    businessName = null,
+    address = null,
+  }) {
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const existing = await db.query(
+      `SELECT id FROM users WHERE LOWER(email) = $1;`,
+      [normalizedEmail]
+    );
+
+    if (existing.rows.length > 0) {
+      throw new ConflictError('An account with this email address already exists. Please log in.');
+    }
+
+    const passwordHash = await hashPassword(password);
+    // STRICT SECURITY: Public registration is locked exclusively to Customer role
+    const role = ROLES.CUSTOMER;
+
+    const userRes = await db.query(
+      `INSERT INTO users (email, password_hash, full_name, role, phone)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, email, full_name, role, phone, is_active, created_at;`,
+      [normalizedEmail, passwordHash, fullName, role, phone]
+    );
+
+    const newUser = userRes.rows[0];
+
+    // Generate unique Customer Code
+    const customerCode = `CUST-${Date.now().toString().slice(-6)}`;
+    const effectiveStreet = addressStreet || address || 'Installation Site';
+    const effectiveLocation = installationLocation || addressCity || 'Rooftop';
+    const capacityNum = parseFloat(requiredCapacityKw) || 3.0;
+
+    // Find active Warehouse to assign customer to
+    const whRes = await db.query(
+      `SELECT id FROM users WHERE role = 'Warehouse' AND is_active = true ORDER BY created_at ASC LIMIT 1;`
+    );
+    const assignedWarehouseId = whRes.rows[0]?.id || null;
+    const assignmentStatus = assignedWarehouseId ? 'ASSIGNED' : 'PENDING_ASSIGNMENT';
+
+    // Create linked Customer Profile
+    const custRes = await db.query(
+      `INSERT INTO customers (
+         customer_code, full_name, email, phone, 
+         address_street, address_city, address_state, address_pincode, 
+         electricity_consumer_number, sanctioned_load_kw, user_id, created_by,
+         assigned_warehouse_id, assignment_status, assigned_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
+       RETURNING id, customer_code;`,
+      [
+        customerCode,
+        fullName,
+        normalizedEmail,
+        phone,
+        effectiveStreet,
+        addressCity || 'Ahmedabad',
+        addressState || 'Gujarat',
+        addressPincode || '380001',
+        electricityConsumerNumber || null,
+        capacityNum,
+        newUser.id,
+        newUser.id,
+        assignedWarehouseId,
+        assignmentStatus,
+      ]
+    );
+
+    const newCustomer = custRes.rows[0];
+
+    if (assignedWarehouseId) {
+      await db.query(
+        `INSERT INTO customer_assignments (
+           customer_id, assigned_by, warehouse_id, assignment_notes
+         ) VALUES ($1, $2, $3, 'Auto-assigned to Warehouse on Registration');`,
+        [newCustomer.id, newUser.id, assignedWarehouseId]
+      );
+    }
+
+    // Create initial Installation Requirement record
+    const fullAddress = [effectiveStreet, addressCity, addressState, addressPincode].filter(Boolean).join(', ');
+    await db.query(
+      `INSERT INTO customer_installation_requirements (
+         customer_id, user_id, property_type, preferred_system_type, 
+         required_capacity_kw, electricity_consumer_number, 
+         full_installation_address, installation_location, status
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'SUBMITTED');`,
+      [
+        newCustomer.id,
+        newUser.id,
+        solarRequirement || 'Residential',
+        'On-Grid',
+        capacityNum,
+        electricityConsumerNumber || null,
+        fullAddress,
+        effectiveLocation,
+      ]
+    );
+
+    // Record timeline entry
+    await db.query(
+      `INSERT INTO customer_timeline (customer_id, event_type, title, description, created_by)
+       VALUES ($1, $2, $3, $4, $5);`,
+      [
+        newCustomer.id,
+        'CUSTOMER_REGISTERED',
+        'Customer Account Registered',
+        `Customer signed up via Customer Portal with ${capacityNum} kW ${solarRequirement} requirement.`,
+        newUser.id,
+      ]
+    );
+
+    await recordAuditLog({
+      userId: newUser.id,
+      action: 'PUBLIC_CUSTOMER_REGISTERED',
+      entity: 'CUSTOMER',
+      entityId: newCustomer.id,
       newValues: {
         email: newUser.email,
         role: newUser.role,
         fullName: newUser.full_name,
+        customerCode: newCustomer.customer_code,
+        capacityKw: capacityNum,
+        solarRequirement,
         businessName,
-        address,
       },
     });
 
     return {
       id: newUser.id,
+      customerId: newCustomer.id,
+      customerCode: newCustomer.customer_code,
       email: newUser.email,
       fullName: newUser.full_name,
       role: newUser.role,
@@ -452,6 +613,13 @@ export class AuthService {
         role: ROLES.SUPPORT,
         phone: '+91 98765 00005',
       },
+      {
+        email: 'customer@sunpower.com',
+        password: 'Customer@12345',
+        fullName: 'Ramesh Patel (Customer)',
+        role: ROLES.CUSTOMER,
+        phone: '+91 98765 11111',
+      },
     ];
 
     const seeded = [];
@@ -465,12 +633,59 @@ export class AuthService {
            RETURNING id, email, full_name, role;`,
           [acc.email.toLowerCase(), passwordHash, acc.fullName, acc.role, acc.phone]
         );
-        seeded.push(insertRes.rows[0]);
+        const newUser = insertRes.rows[0];
+        seeded.push(newUser);
+
+        // If Customer, link a customer profile and initial requirements
+        if (acc.role === ROLES.CUSTOMER) {
+          const custCode = `CUST-${Date.now().toString().slice(-6)}`;
+          const custRes = await db.query(
+            `INSERT INTO customers (
+               customer_code, full_name, email, phone, 
+               address_street, address_city, address_state, address_pincode, 
+               electricity_consumer_number, sanctioned_load_kw, user_id, created_by
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             RETURNING id;`,
+            [
+              custCode,
+              acc.fullName,
+              acc.email.toLowerCase(),
+              acc.phone,
+              'Plot 42, Sunrise Enclave, Bodakdev',
+              'Ahmedabad',
+              'Gujarat',
+              '380054',
+              '100293847',
+              5.0,
+              newUser.id,
+              newUser.id,
+            ]
+          );
+          const custId = custRes.rows[0].id;
+
+          await db.query(
+            `INSERT INTO customer_installation_requirements (
+               customer_id, user_id, property_type, preferred_system_type, 
+               required_capacity_kw, electricity_consumer_number, 
+               full_installation_address, installation_location, status
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'SUBMITTED');`,
+            [
+              custId,
+              newUser.id,
+              'Residential',
+              'On-Grid',
+              5.0,
+              '100293847',
+              'Plot 42, Sunrise Enclave, Bodakdev, Ahmedabad, Gujarat - 380054',
+              'Main Rooftop (RCC Flat)',
+            ]
+          );
+        }
       }
     }
 
     if (seeded.length > 0) {
-      console.log(`[Auth Seeder] Successfully seeded ${seeded.length} default user(s) for the 5 project roles.`);
+      console.log(`[Auth Seeder] Successfully seeded ${seeded.length} default user(s).`);
     }
 
     return seeded;

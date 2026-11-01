@@ -4,6 +4,10 @@ import CustomerSalesModule from '../../features/customer-sales/CustomerSalesModu
 import OperationsModule from '../../features/operations/OperationsModule';
 import SupportFinanceApp from '../../features/support-finance/SupportFinanceApp';
 import UserManagementView from '../users/UserManagementView';
+import CustomerDashboardView from '../../features/customer-sales/components/CustomerDashboardView';
+import CustomerInstallationRequirements from '../../features/customer-sales/components/CustomerInstallationRequirements';
+import CustomerInstallationStatusView from '../../features/customer-sales/components/CustomerInstallationStatusView';
+import TechnicianJobCardPortal from '../../features/operations/technicians/TechnicianJobCardPortal';
 import customerSalesApi from '../../features/customer-sales/api/customerSalesApi';
 import {
   Sun,
@@ -36,28 +40,17 @@ import {
 const WORKFLOW_STEPS = [
   {
     step: 1,
-    id: 'leads',
-    title: 'Customer & Lead Generation',
-    role: 'Sales',
-    description: 'Capture customer enquiry, conduct technical feasibility site survey, and generate BOM quotation.',
+    id: 'customers',
+    title: 'Customer Onboarding & Requirements',
+    role: 'Admin/Owner',
+    description: 'Register customer, capture solar capacity requirement, and review technical installation specs.',
     status: 'Completed',
-    actionText: 'Manage Leads & CRM',
-    targetTab: 'leads',
-    subDetails: 'Lead qualified -> Survey scheduled -> Quotation submitted for approval.',
+    actionText: 'Manage Customers',
+    targetTab: 'customers',
+    subDetails: 'Customer created -> Specs submitted -> Engineering verification.',
   },
   {
     step: 2,
-    id: 'quotes',
-    title: 'Commercial Approval & Order Creation',
-    role: 'Admin/Owner',
-    description: 'Review quotation pricing, approve custom discounts, and accept order into the project lifecycle.',
-    status: 'Completed',
-    actionText: 'Review Quotations',
-    targetTab: 'quotes',
-    subDetails: 'Digital customer sign-off -> Advance payment verified -> Project order created.',
-  },
-  {
-    step: 3,
     id: 'inventory',
     title: 'Material Reservation & Dispatch',
     role: 'Warehouse',
@@ -68,7 +61,7 @@ const WORKFLOW_STEPS = [
     subDetails: 'Inventory balance check -> Material reservation -> Barcode verification -> Dispatch challan.',
   },
   {
-    step: 4,
+    step: 3,
     id: 'jobs',
     title: 'Rooftop Installation & Testing',
     role: 'Technician',
@@ -79,7 +72,7 @@ const WORKFLOW_STEPS = [
     subDetails: 'Assigned crew -> Physical mounting -> Electrical safety testing -> Customer sign-off.',
   },
   {
-    step: 5,
+    step: 4,
     id: 'tickets',
     title: 'Customer Support & Warranty',
     role: 'Support',
@@ -90,7 +83,7 @@ const WORKFLOW_STEPS = [
     subDetails: 'Warranty certificate active -> SLA ticketing -> Field service coordination -> Case closure.',
   },
   {
-    step: 6,
+    step: 5,
     id: 'finance',
     title: 'Lifecycle Oversight & Margin Review',
     role: 'Admin/Owner',
@@ -98,7 +91,7 @@ const WORKFLOW_STEPS = [
     status: 'Pending',
     actionText: 'Financial Overview',
     targetTab: 'finance',
-    subDetails: 'Realized revenue vs BOM cost -> Technician payroll audit -> Milestone completion.',
+    subDetails: 'Realized revenue vs project cost -> Technician payroll audit -> Milestone completion.',
   },
 ];
 
@@ -154,12 +147,12 @@ function CleanAuditLogsView({ user }) {
     },
     {
       id: 'AUD-906',
-      action: 'QUOTATION_SUBMITTED',
-      description: 'Commercial BOM quotation QTE-2026-015 submitted for customer approval',
+      action: 'CUSTOMER_SUPPORT_VERIFIED',
+      description: 'Support verified customer technical requirements dossier',
       actor: 'Priya Verma',
-      role: 'Sales',
+      role: 'Support',
       timestamp: '2026-10-31 11:10:44',
-      status: 'SUBMITTED',
+      status: 'VERIFIED',
     },
   ];
 
@@ -235,48 +228,6 @@ function CleanAuditLogsView({ user }) {
    ROLE-SPECIFIC KPI METRICS CARDS (LIGHT THEME, CRISP CONTRAST)
    ========================================================================= */
 function RoleMetricsCards({ role }) {
-  if (role === 'Sales') {
-    return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500 text-xs font-semibold">
-            <span>New Leads &amp; CRM</span>
-            <Users className="h-4 w-4 text-blue-600" />
-          </div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">18 Active</div>
-          <div className="text-xs text-emerald-700 font-semibold mt-1">4 qualified today</div>
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500 text-xs font-semibold">
-            <span>Site Surveys Pending</span>
-            <Wrench className="h-4 w-4 text-amber-500" />
-          </div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">6 Scheduled</div>
-          <div className="text-xs text-amber-700 font-semibold mt-1">2 rooftop surveys today</div>
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500 text-xs font-semibold">
-            <span>Quotations Sent</span>
-            <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-          </div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">12 Active</div>
-          <div className="text-xs text-emerald-700 font-semibold mt-1">₹34.8 Lakhs quoted total</div>
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500 text-xs font-semibold">
-            <span>Closed &amp; Accepted</span>
-            <CheckCheck className="h-4 w-4 text-purple-600" />
-          </div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">8 Projects</div>
-          <div className="text-xs text-purple-700 font-semibold mt-1">Transferred to Operations</div>
-        </div>
-      </div>
-    );
-  }
-
   if (role === 'Warehouse') {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -834,90 +785,6 @@ function RoleCustomerAssignmentWidget({ user, onSelectTab }) {
     );
   }
 
-  // B. SELLER / SALES VIEW: Assigned Customers & Quotation Flow
-  if (role === 'Sales') {
-    return (
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
-              <Users className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900">
-                My Registered &amp; Assigned Solar Customers ({customers.length})
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Strict Privacy Scoped: Only your authorized customer portfolio and quotations are accessible.
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => onSelectTab('customers')}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-sm transition"
-          >
-            <UserPlus className="h-3.5 w-3.5" />
-            <span>Register Customer</span>
-          </button>
-        </div>
-
-        {customers.length === 0 ? (
-          <div className="p-6 bg-slate-50 rounded-xl text-center border border-dashed border-slate-200">
-            <p className="text-xs text-slate-500">You have no registered customers yet. Click "Register Customer" to begin.</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] tracking-wider border-b border-slate-200 font-semibold">
-                <tr>
-                  <th className="py-2.5 px-4">Customer</th>
-                  <th className="py-2.5 px-4">Contact</th>
-                  <th className="py-2.5 px-4">Capacity &amp; Requirement</th>
-                  <th className="py-2.5 px-4">Team Assignment</th>
-                  <th className="py-2.5 px-4 text-right">Commercial Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
-                {customers.slice(0, 5).map((c) => (
-                  <tr key={c.id} className="hover:bg-slate-50/70 transition">
-                    <td className="py-3 px-4 font-bold text-slate-900">
-                      <div>{c.full_name}</div>
-                      <div className="font-mono text-[10px] text-emerald-700">{c.customer_code}</div>
-                    </td>
-                    <td className="py-3 px-4 text-slate-600">
-                      <div>{c.phone}</div>
-                      <div className="text-[11px] text-slate-400">{c.address_city}</div>
-                    </td>
-                    <td className="py-3 px-4 font-semibold text-slate-800">
-                      {c.required_capacity_kw || 3.0} kW ({c.solar_requirement || 'On-Grid'})
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        c.assignment_status === 'ASSIGNED'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-amber-100 text-amber-800'
-                      }`}>
-                        {c.assignment_status === 'ASSIGNED' ? 'Team Ready' : 'Pending Team'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() => onSelectTab('quotes')}
-                        className="inline-flex items-center gap-1 px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs rounded-lg transition"
-                      >
-                        Quotes &amp; BOM <ChevronRight className="h-3 w-3" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    );
-  }
-
   // C. WAREHOUSE MANAGER VIEW: Assigned Material Requisitions
   if (role === 'Warehouse') {
     return (
@@ -1194,15 +1061,6 @@ function BusinessOverview({ user, onSelectTab }) {
               Manage Users
             </button>
           )}
-          {user?.role === 'Sales' && (
-            <button
-              onClick={() => onSelectTab('customers')}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-sm"
-            >
-              <UserPlus className="h-4 w-4" />
-              Register Customer
-            </button>
-          )}
         </div>
       </div>
 
@@ -1228,42 +1086,84 @@ export default function Dashboard({ activeTab = 'dashboard', onSelectTab = () =>
   const { user } = useAuth();
   const normalizedRole = user?.role === 'Admin/Owner' ? 'Admin' : (user?.role || 'Admin');
 
-  // 1. User Management (Admin/Owner restricted)
-  if (activeTab === 'users') {
+  // 1. Customer Portal Dedicated Routing (Strictly customer-facing views)
+  if (user?.role === 'Customer') {
+    if (activeTab === 'requirements') {
+      return <CustomerInstallationRequirements onSelectTab={onSelectTab} />;
+    }
+    if (activeTab === 'status' || activeTab === 'jobs') {
+      return <CustomerInstallationStatusView onSelectTab={onSelectTab} />;
+    }
+    if (activeTab === 'tickets') {
+      return <SupportFinanceApp key="customer-tickets" activeTab="support" currentRole="Customer" />;
+    }
+    // Block internal operations, inventory, quotes, customers, users, finance, audit for Customer
+    return <CustomerDashboardView onSelectTab={onSelectTab} />;
+  }
+
+  // 2. Technician Portal Dedicated Routing
+  if (user?.role === 'Technician') {
+    if (activeTab === 'jobs') {
+      return <TechnicianJobCardPortal onSelectTab={onSelectTab} />;
+    }
+    if (activeTab === 'customers') {
+      return <CustomerSalesModule key="customers" initialTab="customers" />;
+    }
+    if (activeTab === 'tickets') {
+      return <SupportFinanceApp key="technician-tickets" activeTab="support" currentRole="Technician" />;
+    }
+    // Block inventory, users, finance, audit for Technician
+    return <BusinessOverview user={user} onSelectTab={onSelectTab} />;
+  }
+
+  // 3. Warehouse Portal Dedicated Routing
+  if (user?.role === 'Warehouse') {
+    if (activeTab === 'inventory') {
+      return <OperationsModule key="warehouse-operations" currentRole="Warehouse" initialTab="inventory" />;
+    }
+    if (activeTab === 'customers') {
+      return <CustomerSalesModule key="customers" initialTab="customers" />;
+    }
+    // Block jobs (rooftop execution), users, finance, audit for Warehouse
+    return <BusinessOverview user={user} onSelectTab={onSelectTab} />;
+  }
+
+  // 4. Admin / Management Portal Routing
+  // 4.1 User Management (Admin/Owner restricted)
+  if (activeTab === 'users' && user?.role === 'Admin/Owner') {
     return <UserManagementView />;
   }
 
-  // 1.1 Dedicated Customer Directory (All 5 Roles with Scoped Privacy)
+  // 4.2 Customer & Quotation Management (Requirements Review, Quote Approvals, Settings)
   if (activeTab === 'customers') {
     return <CustomerSalesModule key="customers" initialTab="customers" />;
   }
 
-  // 2. Customer & Sales Module
-  if (activeTab === 'leads' || activeTab === 'quotes') {
-    return <CustomerSalesModule key={activeTab} initialTab={activeTab} />;
-  }
-
-  // 3. Operations & Fulfilment Module
-  if (activeTab === 'jobs') {
-    return <OperationsModule key="jobs" initialTab="jobcard" />;
-  }
+  // 4.3 Operations & Fulfilment Hub (Admin oversight)
   if (activeTab === 'inventory') {
-    return <OperationsModule key="inventory" initialTab="inventory" />;
+    return <OperationsModule key="inventory" currentRole={user?.role} initialTab="inventory" />;
   }
 
-  // 4. Support, Finance & AI Module
+  // 4.4 Rooftop Jobs (Admin field execution monitoring)
+  if (activeTab === 'jobs') {
+    return <OperationsModule key="jobs" currentRole={user?.role} initialTab="jobcard" />;
+  }
+
+  // 4.5 Support & Helpdesk
   if (activeTab === 'tickets') {
     return <SupportFinanceApp key="tickets" activeTab="support" currentRole={normalizedRole} />;
   }
-  if (activeTab === 'finance') {
+
+  // 4.6 Financial Margins (Admin/Owner restricted)
+  if (activeTab === 'finance' && user?.role === 'Admin/Owner') {
     return <SupportFinanceApp key="finance" activeTab="finance" currentRole={normalizedRole} />;
   }
 
-  // 5. Security & Audit Logs (Clean Commercial View)
-  if (activeTab === 'audit') {
+  // 4.7 Security & Audit Logs (Admin/Owner restricted)
+  if (activeTab === 'audit' && user?.role === 'Admin/Owner') {
     return <CleanAuditLogsView user={user} />;
   }
 
-  // 6. Default: Business Overview with Sequential Stepper
+  // 5. Default: Business Overview with Sequential Stepper
   return <BusinessOverview user={user} onSelectTab={onSelectTab} />;
 }
